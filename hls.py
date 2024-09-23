@@ -1,11 +1,3 @@
-'''
-Mock HLS library for python. This library allows you to prototype different memory and interconnect configurations for hardware projects.
-
-Usage:
-This library defines 3 classes that represent 3 types of hardware: Register, BRAM, and Logic. Registers and memory are instantiated as-is. Logic is an abstract class. Inheritors of Logic must only implement the logic() method, which 
-'''
-
-
 from abc import ABC, abstractmethod
 from collections import deque
 
