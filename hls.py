@@ -61,6 +61,8 @@ class Register:
         self._called = True
 
         self.o.set(self.content)
+        if self.write_enable is not None:
+            self.write_enable()
 
     def connected(self):
         msg = ""
