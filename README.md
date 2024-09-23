@@ -36,9 +36,11 @@ Like registers, the memory contents may be initialized, read, and modified by ac
 # connections
 To actually wire the FPGA together, call the `connect` function on individual ports. e.g.:
 
+```
 reg = Register()
 mem = BRAM(size=100,ports=2)
 connect(reg.o, mem.oaddr[1])
+```
 
 # MockFPGA
 To run your circuit, instantiate the MockFPGA object and add your components via the add() method. Then, each call to MockFPGA.clock() will simulate a single cycle of your circuit's operation.
