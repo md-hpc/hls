@@ -10,7 +10,9 @@ These are all collected and simulated by a MockFPGA object.
 class Logic, as the name implies, represents the logic circuits of the FPGA. The subclasses represent different kinds of logic circuits you'd find on the FPGA. For our project, these would be things like particle pair filters, force pipelines, and multiplexors. Logic is an abstract class, and it's subclasses must implement two methods: __init__() and logic()
 
 Logic.__init__(): is used for two things: declaring IO and pipeline length. Each IO must be an attribute of class Input() or Output(). Pipeline length can be declared by calling the pipeline() method.
-Logic.logic(): actually implements the logic of your class. It takes no parameters and returns no value. Instead, IO is performed by calling the inputs and outputs declared in __init__. Please do not access the val attributes of your IO directly. Instead, use the get() and set() methods for input and output, respectively.
+Logic.logic(): actually implements the logic of your class. It takes no parameters and returns no value. Instead, IO is performed by calling the inputs and outputs declared in `__init__`. To access a Logic's io, use the get() and set() methods for input and output, respectively.
+
+All `Input.get()` calls within a method must be made before any `Output.set()` calls. Otherwise, circular data dependencies that deadlock your system can easily be formed.
 
 When you make a logic unit pipelined with self.pipeline(n), it will cause the output to lag the input by n cycles.
 
