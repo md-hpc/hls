@@ -6,8 +6,8 @@ class Accumulator(Logic):
     def __init__(self):
         super().__init__()
 
-        self.last = Register(self, 0)
-        self.addr = Register(self, 0)
+        self.last = Input(self)
+        self.addr = Input(self)
         self.this = Input(self)
         
         self.sum = Output(self)
@@ -49,38 +49,37 @@ connect(adder.next, reg.i)
 
 for i in range(100):
     m.clock()
-    print(reg.content)
+    print(reg.contents)
 
 # adder
 # sums over the memory such that mem[i] is the sum of mem[0] to mem[i]
+
 m = MockFPGA()
-N = 100000
-for i in range(N):
-    mem = m.add(BRAM(size=100, ports=1))
-    mem.contents = [1 for _ in range(100)]
 
-    last = m.add(Register())
-    ptr = m.add(Register())
-    adder = m.add(Accumulator())
+mem = m.add(BRAM(size=100, ports=1))
+mem.contents = [1 for _ in range(100)]
 
-    # sum -> last (reg) -> last
-    connect(adder.sum, last.i)
-    connect(last.o, adder.last)
+last = m.add(Register())
+ptr = m.add(Register())
+adder = m.add(Accumulator())
 
-    # addr+1 -> ptr -> addr
-    connect(adder.nextAddr, ptr.i)
-    connect(ptr.o, adder.addr)
+# sum -> last (reg) -> last
+connect(adder.sum, last.i)
+connect(last.o, adder.last)
 
-    # mem[ptr] -> this
-    connect(ptr.o, mem.oaddr[0])
-    connect(mem.o[0], adder.this)
+# addr+1 -> ptr -> addr
+connect(adder.nextAddr, ptr.i)
+connect(ptr.o, adder.addr)
 
-    # sum -> mem[ptr]
-    connect(ptr.o, mem.iaddr[0])
-    connect(adder.sum, mem.i[0])
+# mem[ptr] -> this
+connect(ptr.o, mem.oaddr[0])
+connect(mem.o[0], adder.this)
 
-print(len(m.units))
+# sum -> mem[ptr]
+connect(ptr.o, mem.iaddr[0])
+connect(adder.sum, mem.i[0])
+
 m.verify_connections() # checks that no Inputs or Outputs are left dangling
 for i in range(100):
-    print(i)
+    print(mem.contents)
     m.clock()
