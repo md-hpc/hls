@@ -1,5 +1,5 @@
 Mock HLS library for python. This library allows you to prototype different memory and interconnect configurations for hardware projects.        
-                                                                                                                                                                                                                       Usage:                                                                                                                  This library defines 3 classes that represent 3 types of hardware: Register, BRAM, and Logic.                
+                                                                                                                                                            This library defines 3 classes that represent 3 types of hardware: Register, BRAM, and Logic.                
 
 It also defines two module IO classes: Input and Output. These are used to connect the different components and are referred to generally as "ports"
 

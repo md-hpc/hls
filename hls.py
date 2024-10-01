@@ -46,21 +46,21 @@ class Output:
 class Register:
     def __init__(self, write_enable_port = False):
         self._called = False
-        self.content = 0
+        self.contents = 0
         self.i = Input(self)
         self.o = Output(self)
         self.write_enable = Input(self) if write_enable_port else None
 
     def write(self):
         if (self.write_enable is None or self.write_enable()):
-            self.content = self.i()
+            self.contents = self.i()
 
     def __call__(self):
         if self._called:
             return
         self._called = True
 
-        self.o.set(self.content)
+        self.o.set(self.contents)
         if self.write_enable is not None:
             self.write_enable()
 
