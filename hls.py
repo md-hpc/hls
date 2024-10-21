@@ -1,6 +1,8 @@
 from abc import ABC, abstractmethod
 from collections import deque
 
+WIDE_IO_BRAM = False
+
 class Input:
     def __init__(self, parent):
         self.val = None
@@ -81,37 +83,27 @@ class Register:
         self._called = False
 
 class BRAM:
-    def __init__(self, size, ports=None, iports=None, oports=None):
+    def __init__(self, size):
         self._called = False
 
         self.contents = [0 for _ in range(size)]
-        
-        if ports is None and (iports is None or oports is None):
-            raise Exception("BRAM.__init__: if ports is not specified, must specify both iports and oports")
 
-        if iports is None:
-            iports = ports
+        self.i = Input(self)
+        self.iaddr = Input(self)
+        self.write_enable = Input(self)
 
-        if oports is None:
-            oports = ports
-
-        self.i = [Input(self) for _ in range(iports)]
-        self.iaddr = [Input(self) for _ in range(iports)]
-
-        self.o = [Output(self) for _ in range(oports)]
-        self.oaddr = [Input(self) for _ in range(oports)]
+        self.o = Output(self)
+        self.oaddr = Input(self)
 
     def write(self):
-        for i, addr in zip(self.i, self.iaddr):
-            self.contents[addr()] = i()
+        if self.write_enable():
+            self.contents[self.iaddr()] = self.i()
 
     def __call__(self):
         if self._called == True:
             return
         self._called = True
-
-        for o, addr in zip(self.o, self.oaddr):
-            o.set(self.contents[addr()])
+        self.o.set(self.contents[self.oaddr()])
 
     def connected(self):
         msg = ""
@@ -134,19 +126,13 @@ class BRAM:
         return "BRAM: "+msg if len(msg) else None
 
     def reset(self):
-        for i in self.i:
-            i.reset()
-
-        for o in self.o:
-            o.reset()
-
-        for i in self.iaddr:
-            i.reset()
-
-        for i in self.oaddr:
-            i.reset()
+        self.i.reset()
+        self.o.reset()
+        self.iaddr.reset()
+        self.oaddr.reset()
         
         self._called = False
+
 
 class Logic(ABC):
     def __init__(self):
