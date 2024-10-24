@@ -9,6 +9,8 @@ FORCE_PIPELINE_STAGES = 70
 FILTER_PIPELINE_STAGES = 9
 FILTER_BANK_SIZE = 13
 
+NULL = -1
+
 N_CELLS = UNIVERSE_SIZE ** 3
 
 '''
@@ -52,6 +54,48 @@ class CellIndex:
                 if coordinate[i]:
                     yield coordinate
 
+class Queue(hls.Logic):
+    def __init__(self, fan_in): 
+        self.i = [hls.Input(self) for _ in range(fan_in)]
+        self.q = []
+        self.o = hls.Output(self)
+
+    def logic(self):
+        for i in self.i:
+            a = i.get()
+            if a != NULL:
+                self.q.append(a)
+        
+        if len(self.q) == 0:
+            self.o.set(NULL)
+        else:
+            self.o.set(self.q.pop(0))
+
+class Adder(hls.Logic):
+    def __init___(self, fan_in):
+        self.i = [hls.Input(self) for _ in range(fan_in)]
+        self.o = hls.Output(self)
+
+    def logic(self):
+        s = 0
+        for i in self.i:
+            s += i.get()
+        self.o.set(s)
+        
+class Mux(hls.Logic):
+    def __init__(self, fan_in):
+        self.i = [hls.Input(self) for _ in range(fan_in)]
+        self.select = hls.Input(self)
+        self.o = hls.Output(self)
+
+    def logic(self):
+        idx = self.select.get()
+        self.o.set(
+                self.i[idx].get()
+        )
+
+
+
 class ParticleFilter(hls.Logic):
     def __init__(self):
         super().__init__()
@@ -72,7 +116,7 @@ class ParticleFilter(hls.Logic):
         halt = self.halt.get()
 
         if halt:
-            self.pair.set(0)
+            self.pair.set(NULL)
             return
 
         r = math.sqrt(sum([
@@ -80,7 +124,7 @@ class ParticleFilter(hls.Logic):
         ]))
 
         self.pair.set(
-                (r, n) if r < CUTOFF else None
+                (r, n) if r < CUTOFF else NULL
         )
  
  class ForcePipeline(hls.Logic):
@@ -97,19 +141,21 @@ class ParticleFilter(hls.Logic):
     def logic(self):
         i = self.i.get()
         if i == 0:
-            self.reference.set(0)
-            self.neighbor.set(0)
+            self.reference.set(NULL)
+            self.neighbor.set(NULL)
             return
 
         ref, neighbor = self.i.get()
         f = random.random() - 0.5
+        
+
 
         self.reference.set(
-            (ref_cell, ref_addr, f)
+            Acceleration(cell = ref_cell, addr = ref_addr, a = f)
         )
 
         self.neighbor.set(
-            (neighbor_cell, neighbor_addr, -f)
+            Acceleration(cell = neighbor_cell, addr = neighbor_addr, a = -f)
         )
 
 class PositionCacheReadAddresser(hls.Logic):
@@ -346,6 +392,150 @@ for f, i in zip(filters, pairQueue.i):
 hls.connect(pairQueue.o, forcePipeline.i)
 
 # FORCE WRITEBACK
+class ReferenceAccelerationAccumulator(hls.Logic):
+    def __init__(self):
+        self.f = hls.Input(self)
+        self.ref_regi = hls.Input(self)
 
-reference_force = m.add(hls.Register()
+        self.ref_rego = hls.Output(self)
+        self.ref_writeback = hls.Output(self)
+
+    def logic(self):
+        ref_regi = self.ref_regi.get()
+        f = self.f.get()
+        
+        if f.addr != ref_regi.addr or f.cell != ref_regi.cell:
+            self.o.set(f)
+            self.ref_writeback.set(ref_regi)
+        else:
+            self.o.set(
+                    Acceleration(addr = a1.addr, cell = a1.cell, a = a1.a + a2.a)
+            )
+            self.ref_writeback.set(0)
+
+class AccelerationWriteAddresser(hls.Logic):
+    def __init__(self):
+        self.a = hls.Input(self)
+
+        self.addr = hls.Output(self)
+        self.cell = hls.Output(self)
+
+        self.write_enable = [hls.Output(self) for _ in range(N_CELL)] # wire once to each a_cache
+
+    def logic(self):
+        a = self.a.get()
+
+        if a == NULL:
+            for o in self.write_enable:
+                o.set(0)
+            self.addr.set(0)
+            return
+
+        cell = a.cell
+        addr = a.addr
+
+        self.addr.set(addr)
+        self.cell.set(cell)
+
+        for idx, o in enumerate(self.write_enable):
+            if idx == cell:
+                o.set(1)
+            else:
+                o.set(0)
+
+class AccelerationWriter(hls.Logic):
+    def __init__(self):
+        self.a = hls.Input(self)
+        self.o = [Output(self) for _ in range(N_CELL)]
+
+    def logic(self):
+        accel_r_reg = self.force_r.regi.get()
+        accel_r_pipeline = self.force_r_pipeline.get()
+        accel_n_pipeline = self.force_n_pipeline.get()
+
+        if not ctl_next_reference:
+            for o in self.o:
+                o.set(accel_n_pipeline.a)
+            self.accel_r_rego.set(accel_r_reg)
+        else:
+            for o in self.o:
+                o.set(accel_r_reg.a)
+            self.accel_r_rego.set(Acceleration(cell = self.cell_r.get(), addr = self.addr_r.get(), a = 0))
+
+class ReferenceForceWriter(hls.Logic):
+    def __init__(self):
+        self.reg_i = hls.Input(self) # reference force from accumulator register
+        self.pipeline_i = hls.Input(self) # reference force from pipeline
+
+        self.ctli_next_timestep = hls.Input(self)
+        self.next_timestep = False
+
+        self.reg_o = hls.Output(self)
+        self.bram_o = hls.Output(self)
+
+    def logic(self):
+        reg = self.reg_i.get()
+        pipeline = self.pipeline_i.get()
+        ctl_next_timestep = self.ctli_next_timestep.get()
+
+        if ctl_next_timestep:
+            self.next_timestep = True
+            self.reg_o.set(NULL)
+            self.bram_o.set(NULL)
+        elif pipeline == NULL:
+            self.reg_o.set(reg)
+            self.bram_o.set(NULL)
+        elif self.next_timestep:
+            self.next_timestep = False
+            self.reg_o.set(pipeline)
+            self.bram_o.set(NULL)
+        elif pipeline.addr != reg.addr or pipeline.cell != reg.cell:
+            self.reg_o.set(pipeline)
+            self.bram_o.set(reg)
+        else:
+            reg.a += pipeline.a
+            self.reg_o.set(reg)
+            self.bram_o.set(NULL)
+
+referenceForceWriter = m.add(ReferenceForceWriter())
+forceQueue = m.add(Queue(2))
+accelerationWriteAddresser = m.add(AccelerationWriteAddresser())
+forceAccumulatorMux = m.add(Mux(N_CELL))
+forceAccumulator = m.add(Adder(2))
+
+reference_force = m.add(hls.Register())
+hls.connect(referenceForceWriter.reg_o, reference_force.i)
+
+# accelerationWriteAddresser inputs
+hls.connect(reference_force.o, referenceForceWriter.reg_i)
+hls.connect(forcePipeline.reference, referenceForceWriter.pipeline_i)
+hls.connect(ctl_next_timestep.o, referenceForceWriter.ctli_next_timestep)
+
+# forceQueue inputs
+hls.connect(referenceForceWriter.bram_o, forceQueue.i[0])
+hls.connect(forcePipeline.neighbor, forceQueue.i[1])
+
+# accelerationWriteAddresser inputs
+hls.connect(forceQueue.o, accelerationWriteAddresser.a)
+
+# forceAccumulatorMux inputs
+for idx in range(N_CELL):
+    hls.connect(f_caches[idx].o, forceAccumulatorMux.i[idx])
+hls.connect(accelerationWriteAddresser.cell, forceAccumulatorMux.select)
+
+# forceAccumulator inputs
+hls.connect(forceAccumulatorMux.o, forceAccumulator.i[0])
+hls.connect(forceQueue.i, forceAccumulator.i[1])
+
+
+# f_cache inputs
+for idx in range(N_CELL):
+    cache = f_caches[idx]
+
+    hls.connect(accelerationWriteAddresser.addr, cache.oaddr)
+    hls.connect(accelerationWriteAddresser.addr, cache.iaddr)
+    hls.connect(accelerationWriteAddresser.write_enable[idx], cache.write_enable)
+
+    hls.connect(forceAccumulator.o, cache.i)
+    
 
