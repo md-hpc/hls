@@ -2,6 +2,10 @@ from hls import hls
 import random
 from collections import deque
 
+'''
+WARNING: this file uses OBSOLETE conventions and api's. Please do not rely on it for understanding this library
+'''
+
 UNIVERSE_SIZE = 4
 PARTICLES_PER_CACHE = 120
 CUTOFF = 8.0
@@ -11,11 +15,8 @@ FILTER_BANK_SIZE = 13
 
 NULL = -1
 
-N_CELLS = UNIVERSE_SIZE ** 3
+N_CELL = UNIVERSE_SIZE ** 3
 
-'''
-I'm going to call a particle's (cell, addr) tuple it's "origin"
-'''
 
 class Position:
     def __init__(self, r, addr, cell):
@@ -40,19 +41,6 @@ def linear_idx(i,j,k):
 
 def cell_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
-
-class CellIndex:
-    def __init__(self,start=0,stop=UNIVERSE_SIZE):
-        self.start = start
-        self.stop = stop
-
-    def __iter__(self):
-        coordinate = [self.start for _ in range(3)]
-        while not all([i == self.stop-1 for i in coordinate]):
-            for i in range(len(coordinate)):
-                coordinate[i]=(coordinate[i]+1)%self.stop
-                if coordinate[i]:
-                    yield coordinate
 
 class Queue(hls.Logic):
     def __init__(self, fan_in): 
@@ -538,4 +526,68 @@ for idx in range(N_CELL):
 
     hls.connect(forceAccumulator.o, cache.i)
     
+# MOTION UPDATE
+def MotionUpdateController(hls.Logic):
+    def __init__(self):
+        self.ctli_motion_update = hls.Input(self)
+        
+        self.ctli_velocity_update_done = hls.Input(self)
+
+        self.ctli_velocity_update = hls.Input(self)
+        self.ctlo_velocity_update = hls.Output(self)
+
+        self.ctli_positon_update_done = hls.Input(self)
+
+        self.ctli_positon_update = hls.Input(self)
+        self.ctlo_positon_update = hls.Input(self)
+
+        self.ctlo_next_timestep = hls.Input(self)
+
+    def logic(self):
+        motion_update = self.ctli_motion_update.get()
+        velocity_update = self.
+
+
+# VELOCITY UPDATE
+# idk what I'm doing
+
+def AceelerationReader(hls.Logic):
+    def __init__(self):
+        self.ctli_motion_update = hls.Input(self)
+        
+        self.ctli_position_update = hls.Input(self)
+        self.ctlo_position_update = hls.Output(self)
+        
+        self.idx = 0
+
+        self.i = [hls.Input(self) for _ in range(N_CELL)]
+        self.iaddr = [hls.Output(self) for _ in range(N_CELL)]
+        self.o = [hls.Output(self) for _ in range(N_CELL)]
+        self.oaddr = [hls.Output(self) for _ in range(N_CELL)]
+    
+    def logic(self):
+        ctl_motion_update = self.ctli_motion_update.get()
+        ctl_position_update = self.ctli_position_update.get()
+
+        if not ctl_motion_update:
+            return
+
+        if not ctl_position_update:
+            if self.idx != 0:
+                return
+            self.idx = 0
+        
+        for o in self.iaddr:
+            o.set(self.idx)
+        for o in self.oaddr:
+            o.set(self.idx)
+        for i, o in zip(self.i, self.o):
+            o.set(i.get())
+
+        if all([i.get() == 0 for i in self.i]):
+            self.ctl_position_update.set(0)
+        else:
+            self.ctl_position_update.set(1)
+            self.idx += 1
+
 

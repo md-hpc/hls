@@ -1,0 +1,88 @@
+hls.py defines a set of tools to emulate different memory and wiring configurations for hardware projects.
+
+There are 7 symbols exported from this library: Logic, Register, BRAM, Input, Output, connect, and NULL, MockFPGA
+
+Logic, Register, and BRAM are classes that represent different hardware components
+
+Input and Output are classes created as attributes of the three above classes to allow data to be passed from one module to another
+
+connect "wires" an Output to an Input
+
+NULL is a constant used to explicitly drive an Output to have no value
+
+MockFPGA collects Logic, Registers, and BRAMs to be simulated cycle by cycle
+
+A bit more detail on each:
+
+LOGIC
+Logic is the core of this library. It is an abstract class that represents a single, atomic unit of logic within your larger system.
+Other classes should inherit it and implement two methods: __init__() and logic()
+__init__() must call super().__init__() so that the object can be properly initialized
+Within __init__(), you may declare any number of Input and Output objects. Each of these must be passed a reference to the parent Logic object (self)
+logic() will be called on every MockFPGA.clock()
+Your Logic blocks must be free of cycles: if Logic unit A accepts input from logic unit B, logic unit B cannot accept input from logic unit A or else the library. Otherwise, the library would not be able to resolve the data dependencies
+Some logics are pipelined (see Logic.pipeline). A pipeline depth of P from Logic.pipeline(P) means that the outputs corresponding to the inputs on cycle T will appear at the output of that logic unit on cycle T+P. If fewer than P cycles have been simulated, the pipelined logic unit will output NULL
+
+REGISTER
+Registers hold a single value in the Register.contents attribute. By default this is 0, but you can initialize it to something else if you'd like
+Each register has a Register.i and a Register.o Input and Output member respectively.
+The value in Register.contents is written to Register.o at the beginning of the cycle
+The value in Register.o is written to Register.contents IF it is not NULL (more on that later)
+It's ok to have a cycle contianing a register. e.g. if logic A takes input from register R and register R takes input from logic A, the library will be able to resolve this. This is because the output of the register does not depend on the input of the register from the current cycle
+
+BRAM
+BRAMs hold an array of values in the BRAM.contents attribute. By default this is [0 for _ in range(size)], but you can initialize it to something else if you'd like
+Each BRAM has a BRAM.o (Output), BRAM.oaddr (Input), BRAM.i (Input), and BRAM.iaddr (Input). This emulates a dual-port BRAM
+The value in BRAM.contents[BRAM.oaddr] is written to BRAM.o if BRAM.oaddr is not NULL
+The value in BRAM.i is written to BRAM.contents[BRAM.iaddr] if BRAM.i and BRAM.iaddr are not NULL
+While it's ok to have a logical cycle containing the BRAM. e.g. logic A reads from BRAM.o and writes to BRAM.i, you may not have a cycle containing both the i and iaddr or o and oaddr. e.g. logic A writes to BRAM.oaddr and reads from BRAM.o is a logical cycle that the library cannot resolve. You will most likely need a separate logic unit for addressing and reading if that is part of your function
+
+Input and Output
+These should only be initialized within the __init__ of an hls.Logic.
+The value written to an input is made available by the Input.get() method.
+To write to an Output, use the Output.set() method.
+All Outputs must be set() to a non-None value every cycle. If you wish to explicitly pass nothing, set(hls.NULL)
+
+MOCKFPGA
+This is the container for all of the Logic, Registers, and BRAMs in your emulated system. 
+To add a unit, use the MockFPGA.add() method. This also returns the added object so you can do a one-liner for all of your unit initializations:
+somelogicUnit = m.add(SomeLogicUnit())
+To run a single cycle of the emulator, use the MockFPGA.clock() method.
+
+NULL
+As you can see from hls.py, this is nothing more than an empty list. Because of python's pass-by-reference mechanisms, we can use this as a global constant for when one logic unit needs to say to another "I have nothing to write this cycle, please do nothing". 
+
+Use the "is" operator when doing comparisons with inputs, e.g. `i.get() is hls.NULL`, to guarantee expected behavior.
+
+A trivial example of this would be a demuxltiplexor. Given inputs Value and Select, it needs to send Value to the output indicated by Select. To implement this, you might try
+
+def Demux(hls.Logic):
+    def __init__(self):
+        self.i = hls.Input(self)
+        self.select = hls.Input(self)
+        self.o = [hls.Output(self) for _ in range(4)]
+
+    def logic(self):
+        i = self.i.get()
+        select = self.select.get()
+
+        self.o[select].set(i)
+
+However, this will throw an error! Only one of the four outputs that depend on this logic unit have been driven. Instead, pass hls.NULL to the remaining Outputs:
+
+def Demux(hls.Logic):
+    def __init__(self):
+        self.i = hls.Input(self)
+        self.select = hls.Input(self)
+
+        self.o = [hls.Output(self) for _ in range(4)]
+
+    def logic(self):
+        i = self.i.get()
+        select = self.select.get()
+        for idx, o in enumerate(self.o):
+            if idx == select:
+                o.set(i)
+            else:
+                o.set(hls.NULL)
+

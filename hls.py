@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections import deque
 
-WIDE_IO_BRAM = False
+NULL = []
 
 class Input:
     def __init__(self, parent):
@@ -46,15 +46,15 @@ class Output:
         self.val = None
 
 class Register:
-    def __init__(self, write_enable_port = False):
+    def __init__(self):
         self._called = False
         self.contents = 0
         self.i = Input(self)
         self.o = Output(self)
-        self.write_enable = Input(self) if write_enable_port else None
 
     def write(self):
-        if (self.write_enable is None or self.write_enable()):
+        x = self.i()
+        if x is not NULL:
             self.contents = self.i()
 
     def __call__(self):
@@ -96,14 +96,18 @@ class BRAM:
         self.oaddr = Input(self)
 
     def write(self):
-        if self.write_enable():
-            self.contents[self.iaddr()] = self.i()
+        i = self.i()
+        iaddr = self.iaddr()
+        if x is not NULL and addr is not NULL:
+            self.contents[iaddr] = i
 
     def __call__(self):
         if self._called == True:
             return
         self._called = True
-        self.o.set(self.contents[self.oaddr()])
+        oaddr = self.oaddr()
+        if oaddr is not NULL:
+            self.o.set(self.contents[oaddr])
 
     def connected(self):
         msg = ""
@@ -145,12 +149,14 @@ class Logic(ABC):
     def __setattr__(self, k, v):
         if k != "_init" and not hasattr(self,"_init"):
             raise Exception("Must call super().__init__() on hls.Logic before setting any attributes")
+        if k == "empty":
+            raise Exception("Cannot set empty (reserved for pipelined logic)")
 
         if type(v) is Input:
             self._inputs.append(v)
         if type(v) is Output:
             self._outputs.append(v)
-            self._pipeline = deque([[0 for _ in self._outputs] for _ in self._pipeline])
+            self._pipeline = deque([[NULL for _ in self._outputs] for _ in self._pipeline])
 
         super(Logic, self).__setattr__(k, v)
 
@@ -159,7 +165,9 @@ class Logic(ABC):
         pass
 
     def pipeline(self, n):
-        self._pipeline = deque([[0 for _ in self._outputs] for _ in range(n)])
+        self._pipeline = deque([[NULL for _ in self._outputs] for _ in range(n)])
+        if not hasattr(self,empty):
+            self.empty = Output(self)
 
     def __call__(self):
         if self._called == True:
@@ -167,7 +175,7 @@ class Logic(ABC):
         self._called = True
 
         self.logic()
-        
+        self.empty.val = 0 # satisfy assertion below
         for o in self._outputs:
             if o.val == None:
                 raise Exception(f"Output not set after calling logic unit for {type(self)}")
@@ -175,8 +183,10 @@ class Logic(ABC):
         self._pipeline.append(
                 [o.val for o in self._outputs]
         )
+        self.empty.val = 1 if len(self._pipeline) == 0 else 0
         for o, val in zip(self._outputs, self._pipeline.popleft()):
             o.val = val
+        
 
     def connected(self):
         msg = ""
@@ -242,3 +252,6 @@ def connect(o, i):
         raise ValueError(f"input belonging to {type(i.parent)} already has output belonging to {type(o.parent)}")
     o.inputs.append(i)
     i.output = o
+
+
+__all__ = [NULL, Input, Output, Logic, BRAM, Register, MockFPGA]
