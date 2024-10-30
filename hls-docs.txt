@@ -24,14 +24,14 @@ Your Logic blocks must be free of cycles: if Logic unit A accepts input from log
 Some logics are pipelined (see Logic.pipeline). A pipeline depth of P from Logic.pipeline(P) means that the outputs corresponding to the inputs on cycle T will appear at the output of that logic unit on cycle T+P. If fewer than P cycles have been simulated, the pipelined logic unit will output NULL
 
 REGISTER
-Registers hold a single value in the Register.contents attribute. By default this is 0, but you can initialize it to something else if you'd like
+Registers hold a single value in the Register.contents attribute. By default this is NULL, but you can initialize it to something else if you'd like
 Each register has a Register.i and a Register.o Input and Output member respectively.
 The value in Register.contents is written to Register.o at the beginning of the cycle
 The value in Register.o is written to Register.contents IF it is not NULL (more on that later)
 It's ok to have a cycle contianing a register. e.g. if logic A takes input from register R and register R takes input from logic A, the library will be able to resolve this. This is because the output of the register does not depend on the input of the register from the current cycle
 
 BRAM
-BRAMs hold an array of values in the BRAM.contents attribute. By default this is [0 for _ in range(size)], but you can initialize it to something else if you'd like
+BRAMs hold an array of values in the BRAM.contents attribute. By default this is [NULL for _ in range(size)], but you can initialize it to something else if you'd like
 Each BRAM has a BRAM.o (Output), BRAM.oaddr (Input), BRAM.i (Input), and BRAM.iaddr (Input). This emulates a dual-port BRAM
 The value in BRAM.contents[BRAM.oaddr] is written to BRAM.o if BRAM.oaddr is not NULL
 The value in BRAM.i is written to BRAM.contents[BRAM.iaddr] if BRAM.i and BRAM.iaddr are not NULL

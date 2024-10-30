@@ -48,7 +48,7 @@ class Output:
 class Register:
     def __init__(self):
         self._called = False
-        self.contents = 0
+        self.contents = NULL
         self.i = Input(self)
         self.o = Output(self)
 
@@ -86,7 +86,7 @@ class BRAM:
     def __init__(self, size):
         self._called = False
 
-        self.contents = [0 for _ in range(size)]
+        self.contents = [NULL for _ in range(size)]
 
         self.i = Input(self)
         self.iaddr = Input(self)
