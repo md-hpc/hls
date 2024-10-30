@@ -101,7 +101,7 @@ connect(phase3.CTL_POSITION_UPDATE_DONE, controlUnit.phase3_position_update_done
 T = 5 # number of timesteps
 
 L = CUTOFF * UNIVERSE_SIZE # length of one dimension of the simulation box
-N = 80 * UNIVERSE_SIZE # number of particles in the simulation
+N = 80 * N_CELL # number of particles in the simulation
 
 cidx = [0 for _ in range(N_CELL)] # index into contents of each p_cache
 for _ in range(N):
