@@ -4,14 +4,16 @@ from collections import deque
 NULL = []
 
 class Input:
-    def __init__(self, parent):
+    def __init__(self, parent, name):
         self.val = None
         self.parent = parent
+        self.name = name
         self.output = None
 
     def __call__(self):
         if self.val is None:
             self.val = self.output()
+        assert self.val is not None, f"{self.name} read None from Output {self.output.name}"
         return self.val
     
     def connected(self):
@@ -24,14 +26,16 @@ class Input:
         return self()
     
 class Output:
-    def __init__(self, parent):
+    def __init__(self, parent, name):
         self.val = None
         self.parent = parent
+        self.name = name
         self.inputs = []
 
     def __call__(self):
         if self.val is None:
             self.parent()
+        assert self.val is not None, f"{self.name}.set() was not invoked with non-None value by {type(self.parent)}"
         return self.val
 
     def set(self,val):
@@ -46,11 +50,11 @@ class Output:
         self.val = None
 
 class Register:
-    def __init__(self):
+    def __init__(self, name):
         self._called = False
         self.contents = NULL
-        self.i = Input(self)
-        self.o = Output(self)
+        self.i = Input(self, f"{name} i")
+        self.o = Output(self, f"{name} o")
 
     def write(self):
         x = self.i()
@@ -63,8 +67,6 @@ class Register:
         self._called = True
 
         self.o.set(self.contents)
-        if self.write_enable is not None:
-            self.write_enable()
 
     def connected(self):
         msg = ""
@@ -83,17 +85,16 @@ class Register:
         self._called = False
 
 class BRAM:
-    def __init__(self, size):
+    def __init__(self, size, name):
         self._called = False
 
         self.contents = [NULL for _ in range(size)]
 
-        self.i = Input(self)
-        self.iaddr = Input(self)
-        self.write_enable = Input(self)
+        self.i = Input(self, f"{name} i")
+        self.iaddr = Input(self, f"{name} iaddr")
 
-        self.o = Output(self)
-        self.oaddr = Input(self)
+        self.o = Output(self, f"{name} o")
+        self.oaddr = Input(self, f"{name} oaddr")
 
     def write(self):
         i = self.i()
@@ -108,6 +109,8 @@ class BRAM:
         oaddr = self.oaddr()
         if oaddr is not NULL:
             self.o.set(self.contents[oaddr])
+        else:
+            self.o.set(NULL)
 
     def connected(self):
         msg = ""
@@ -149,8 +152,6 @@ class Logic(ABC):
     def __setattr__(self, k, v):
         if k != "_init" and not hasattr(self,"_init"):
             raise Exception("Must call super().__init__() on hls.Logic before setting any attributes")
-        if k == "empty":
-            raise Exception("Cannot set empty (reserved for pipelined logic)")
 
         if type(v) is Input:
             self._inputs.append(v)
@@ -166,8 +167,8 @@ class Logic(ABC):
 
     def pipeline(self, n):
         self._pipeline = deque([[NULL for _ in self._outputs] for _ in range(n)])
-        if not hasattr(self,empty):
-            self.empty = Output(self)
+        if not hasattr(self,"empty"):
+            self.empty = Output(self, f"{type(self)} empty")
 
     def __call__(self):
         if self._called == True:
@@ -252,6 +253,3 @@ def connect(o, i):
         raise ValueError(f"input belonging to {type(i.parent)} already has output belonging to {type(o.parent)}")
     o.inputs.append(i)
     i.output = o
-
-
-__all__ = [NULL, Input, Output, Logic, BRAM, Register, MockFPGA]

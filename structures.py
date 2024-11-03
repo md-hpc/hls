@@ -1,4 +1,4 @@
-from import *
+from hls import *
 import random
 from collections import deque
 
@@ -35,6 +35,13 @@ FILTER_PIPELINE_STAGES = 9
 # derrived from above
 N_CELL = UNIVERSE_SIZE ** 3
 CUTOFF = SIGMA * 2.5
+N_FILTER = 0
+for di in range(-1,2):
+    for dj in range(-1,2):
+        for dk in range(-1,2):
+            if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
+                continue
+            N_FILTER += 1
 
 
 p_caches = [m.add(BRAM(512)) for _ in range(N_CELL)] # position cache
@@ -127,5 +134,5 @@ class ParticleFilter(Logic):
         )
 
 # reference these in the phase{1,2} files
-particleFilter = ParticleFilter()
+filterBank = [ParticleFilter() for _ in range(N_FILTER)]
 forcePipeline = ForcePipeline()
