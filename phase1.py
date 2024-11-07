@@ -62,6 +62,7 @@ class PositionReadController(Logic):
         ctl_force_evaluation_ready = self.ctl_force_evaluation_ready.get() 
         if ctl_force_evaluation_ready and self._cell_r == N_CELL:
             self.halt()
+            return
 
         if not ctl_force_evaluation_ready:
             self._next_timestep = True
@@ -148,10 +149,12 @@ class PositionReader(Logic):
         idx = 0
         for cidx in neighborhood(cell_r):
             r = self.i[cidx].get()
-            if r is not NULL:
+            if r is NULL:
+                self.o[idx].set(NULL)
+            else:
                 stale_reference = False
-            p = Position(cell = cidx, addr = addr, r = r)
-            self.o[idx].set(p)
+                p = Position(cell = cidx, addr = addr, r = r)
+                self.o[idx].set(p)
             idx += 1
 
         self.reference.set(NULL)

@@ -99,15 +99,16 @@ class ParticleFilter(Logic):
 
         self.input_set = set()
 
+        self.verbose = True
+
     def logic(self):
         r = self.reference.get()
         n = self.neighbor.get()
-
+        print(self.name, self._n)
         if r is NULL or n is NULL:
             self.pair.set(NULL)
             return
-
-        p = pident(r,n)
+        p = pident(r.r,n.r)
         self.input_set.add(p)
         self.pair.set(p)
  
@@ -124,8 +125,8 @@ class ForcePipeline(Logic):
         self.input_set.add(i)
 
 # reference these in the phase{1,2} files
-filter_bank = [ParticleFilter(f"filter{i}") for i in range(N_FILTER)]
-force_pipeline = ForcePipeline("FE")
+filter_bank = [m.add(ParticleFilter(f"test-filter{i}")) for i in range(N_FILTER)]
+force_pipeline = m.add(ForcePipeline("FE"))
 
 ident = 0
 for p_cache in p_caches:

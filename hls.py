@@ -102,7 +102,7 @@ class Register:
 
     def connected(self):
         if self.i.output is None:
-            return [self.output.name]
+            return [self.i.name]
         else:
             return []
 
@@ -288,13 +288,13 @@ class MockFPGA:
     def validate(self):
         if not self.validate_identifiers():
             print("validate_identifiers failed")
-            return False
+            exit(1)
         if not self.validate_connections():
             print("validate_connections failed")
-            return False
+            exit(1)
         if not self.validate_dag():
             print("validate_dag failed")
-            return False
+            exit(1)
         return True
 
     def validate_identifiers(self):
@@ -322,7 +322,7 @@ class MockFPGA:
             msg = ", ".join(u.connected())
 
             if len(msg):
-                print(msg)
+                print(f"Inputs not connected in {u.name}: {msg}")
                 passed = False
         return passed
 

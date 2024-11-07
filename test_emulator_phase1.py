@@ -30,10 +30,13 @@ class ControlUnit(Logic):
         self.filter_empty = [Input(self, f"filter-empty-{i}") for i in range(N_FILTER)]
 
         self.ready = 1
+ 
+        self.verbose = False
 
     def logic(self):
         done = self.force_evaluation_done.get()
-        filter_empty = all([i.get() for i in self.filter_empty])
+        filter_empty = all([i.get() is NULL for i in self.filter_empty])
+         
         if done == 1 and filter_empty:
             self.ready = 0
 
