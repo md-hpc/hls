@@ -251,7 +251,7 @@ class Logic(ABC):
         ret = []
         for i in self._inputs:
             if i.output is None:
-                ret.append(i)
+                ret.append(i.name)
         return ret
 
 class MockFPGA:
@@ -320,6 +320,7 @@ class MockFPGA:
         passed = True
         for u in self.units:
             msg = ", ".join(u.connected())
+
             if len(msg):
                 print(msg)
                 passed = False

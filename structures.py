@@ -44,9 +44,9 @@ for di in range(-1,2):
             N_FILTER += 1
 
 
-p_caches = [m.add(BRAM(512, f"p_cache{i}")) for i in range(N_CELL)] # position cache
-a_caches = [m.add(BRAM(512, f"a_cache{i}")) for i in range(N_CELL)] # acceleration cache
-v_caches = [m.add(BRAM(512, f"v_cache{i}")) for i in range(N_CELL)] # velocity cache
+p_caches = [m.add(BRAM(512,"BRAM_p_"+str(i))) for i in range(N_CELL)] # position cache
+a_caches = [m.add(BRAM(512,"BRAM_a_"+str(i))) for i in range(N_CELL)] # acceleration cache
+v_caches = [m.add(BRAM(512,"BRAM_v_"+str(i))) for i in range(N_CELL)] # velocity cache
 
 # structs to hold particle data while it's passing through pipelines
 class Position:
@@ -74,27 +74,14 @@ def linear_idx(i,j,k):
 def cell_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
 
-# given a linear idx of a cell cache, gives the linear index of all neighbors, including self
-class neighborhood:
-    def __init__(self, cidx):
-        self.cidx = cidx
-    def __iter__(self):
-        i, j, k = cell_idx(self.cidx)
-        for di in range(-1,2):
-            for dj in range(-1,2):
-                for dk in range(-1,2):
-                    if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
-                        continue
-                    yield linear_idx(i+di, j+dj, k+dk)
-
 class ParticleFilter(Logic):
-    def __init__(self, name):
-        super().__init__(name)
+    def __init__(self):
+        super().__init__("Particle Filter")
 
-        self.reference = Input(self)
-        self.neighbor = Input(self)
+        self.reference = Input(self,"PF_Reference")
+        self.neighbor = Input(self,"PF_Neighbor")
 
-        self.pair = Output(self)
+        self.pair = Output(self,"PF_Pair")
 
         self.pipeline(FILTER_PIPELINE_STAGES)
 
@@ -115,14 +102,14 @@ class ParticleFilter(Logic):
                 (r, n) if r < CUTOFF else NULL
         )
  
- class ForcePipeline(Logic):
-    def __init__(self, name):
-        super().__init__(name)
+class ForcePipeline(Logic):
+    def __init__(self):
+        super().__init__("Force Pipeline")
+        
+        self.i = Input(self,"FP_input")
 
-        self.i = Input(self)
-
-        self.reference = Output(self)
-        self.neighbor = Output(self)
+        self.reference = Output(self,"FP_Reference")
+        self.neighbor = Output(self,"FP_Neigbor")
         
         self.pipeline(FORCE_PIPELINE_STAGES)
 
@@ -147,5 +134,7 @@ class ParticleFilter(Logic):
         )
 
 # reference these in the phase{1,2} files
-filter_bank = [ParticleFilter(f"filter{i}") for i in range(N_FILTER)]
-force_pipeline = ForcePipeline("FE")
+filterBank = [ParticleFilter() for _ in range(N_FILTER)]
+forcePipeline = ForcePipeline()
+
+
