@@ -180,6 +180,7 @@ class Logic(ABC):
         self.name = name
         self.verbose = False
         self.empty = Output(self,"empty")
+        self._n = 0 # number of inputs in pipeline
 
     def __setattr__(self, k, v):
         if k != "_init" and not hasattr(self,"_init"):
@@ -213,16 +214,17 @@ class Logic(ABC):
                 [o.val for o in self._outputs]
         )
 
-        empty = True
-        for outputs in self._pipeline:
-            for o in outputs:
-                if o is not NULL:
-                    empty = False
+        if any([o.val is not NULL for o in self._outputs]):
+            self._n += 1
 
         for o, val in zip(self._outputs, self._pipeline.popleft()):
             o.val = val
-        self.empty.val = empty
-  
+        
+        if any([o.val is not NULL for o in self._outputs]):
+            self._n -= 1
+ 
+        self.empty.val = self._n == 0
+
         if self.verbose:
             print(f"{self.name}:")
             for o in self._outputs:
