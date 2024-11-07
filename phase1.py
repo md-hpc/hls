@@ -50,7 +50,7 @@ class PositionReadController(Logic):
         self._new_reference = False
         self.new_reference = Output(self, "new-reference") # if PositionReader should write a new value to the reference register
         
-        self.verbose = True
+        # self.verbose = True
     def halt(self):
         self._next_timestep = True
         self.ctl_force_evaluation_done.set(1)
@@ -93,6 +93,7 @@ class PositionReadController(Logic):
                         # If we just incremented past the last cell, halt
                         self.halt()
                         return
+                    self._addr_r = 0
             else:
                 # We need the reader to load a new reference particle
                 self._addr_r += 1
@@ -105,7 +106,7 @@ class PositionReadController(Logic):
             else:
                 self._addr_n += 1
             addr = self._addr_n
-        
+        print(self._cell_r, self._addr_r, self._addr_n)
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)
         self.oaddr.set(addr)
@@ -123,7 +124,7 @@ class PositionReader(Logic):
         self.new_reference = Input(self, "new-reference")
         self.stale_reference = Output(self, "stale-reference")
 
-        self.verbose = True
+        # self.verbose = True
 
     def logic(self):
         cell_r = self.cell_r.get()

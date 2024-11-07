@@ -55,7 +55,7 @@ class Output:
         debug("reading", self.name)
         if self.val is None:
             self.parent()
-        assert self.val is not None, f"{self.name}.set() was not invoked with non-None value by {type(self.parent)}"
+        assert self.val is not None, f"{type(self.parent)} failed to set non-None value for {self.name}. Could be failure to invoke set() on {self.name} or cycle in graph"
         return self.val
 
     def set(self,val):
@@ -201,7 +201,8 @@ class Logic(ABC):
         self._called = True
 
         self.logic()
-        self.empty.val = 0 # satisfy assertion below
+        self.empty.set(NULL)
+
         for o in self._outputs:
             passed = True
             if o.val is None:

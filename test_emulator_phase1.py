@@ -35,9 +35,9 @@ class ControlUnit(Logic):
 
     def logic(self):
         done = self.force_evaluation_done.get()
-        filter_empty = all([i.get() is NULL for i in self.filter_empty])
+        filter_empty = all([i.get() for i in self.filter_empty])
          
-        if done == 1 and filter_empty:
+        if done and filter_empty:
             self.ready = 0
 
         self.double_buffer.set(0)
@@ -61,5 +61,9 @@ for f, reg, i in zip(filter_bank, filter_empty, control_unit.filter_empty):
 t = 0
 while control_unit.ready == 1:
     print("======== Next Timestep ========")
+    t += 1
     m.clock()
+print(t)
 print(len(force_pipeline.input_set))
+print(len(input_set))
+print(len(all_filter_inputs()))

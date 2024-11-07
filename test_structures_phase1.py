@@ -99,12 +99,10 @@ class ParticleFilter(Logic):
 
         self.input_set = set()
 
-        self.verbose = True
 
     def logic(self):
         r = self.reference.get()
         n = self.neighbor.get()
-        print(self.name, self._n)
         if r is NULL or n is NULL:
             self.pair.set(NULL)
             return
@@ -133,6 +131,12 @@ for p_cache in p_caches:
     for i in range(10):
         p_cache.contents[i] = ident
         ident += 1
+
+def all_filter_inputs():
+    s = set()
+    for f in filter_bank:
+        s = s.union(f.input_set)
+    return s
 
 pident = lambda r,n: r*ident + n
 
