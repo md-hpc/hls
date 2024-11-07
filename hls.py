@@ -1,16 +1,25 @@
 from abc import ABC, abstractmethod
 from collections import deque
+import re
 
 NULL = []
+
+empty_ident = re.compile(".*/empty")
+
+CONFIG_VERBOSE = False
+def debug(*args, **kwargs):
+    if CONFIG_VERBOSE:
+        print(*args,**kwargs)
 
 class Input:
     def __init__(self, parent, name):
         self.val = None
         self.parent = parent
-        self.name = name
+        self.name = f"{parent.name}/{name}"
         self.output = None
 
     def __call__(self):
+        debug("reading", self.name)
         if self.val is None:
             self.val = self.output()
         assert self.val is not None, f"{self.name} read None from Output {self.output.name}"
@@ -24,23 +33,27 @@ class Input:
 
     def get(self):
         return self()
-    
+
+    def adjacencies(self):
+        return [self.output.name, self.name]
+
 class Output:
     def __init__(self, parent, name):
         self.val = None
         self.parent = parent
-        self.name = name
+        self.name = f"{parent.name}/{name}"
         self.inputs = []
 
     def __call__(self):
+        debug("reading", self.name)
         if self.val is None:
             self.parent()
         assert self.val is not None, f"{self.name}.set() was not invoked with non-None value by {type(self.parent)}"
         return self.val
 
     def set(self,val):
-        if self.val is not None:
-            raise RecursionError(f"The output of {type(self.parent)} is being set twice")
+        debug("writing", self.name)
+        assert self.val is None, f"{self.name} is being set twice"
         self.val = val
 
     def connected(self):
@@ -52,9 +65,10 @@ class Output:
 class Register:
     def __init__(self, name):
         self._called = False
+        self.name = name
         self.contents = NULL
-        self.i = Input(self, f"{name} i")
-        self.o = Output(self, f"{name} o")
+        self.i = Input(self, f"i")
+        self.o = Output(self, f"o")
 
     def write(self):
         x = self.i()
@@ -63,21 +77,26 @@ class Register:
 
     def __call__(self):
         if self._called:
-            return
+            return self.contents
         self._called = True
-
+        
         self.o.set(self.contents)
 
+    def identifiers(self):
+        return [self.name, self.i.name, self.o.name]
+
+    def adjacencies(self):
+        return [
+                self.i.adjacencies(),
+                [self.i.name, self.name + "(i)"],
+                [self.name + "(o)", self.o.name],
+        ]
+
     def connected(self):
-        msg = ""
-        
-        if not self.i.connected():
-            msg += f"i"
-        
-        if not self.o.connected():
-            msg += f"o"
-        
-        return "register: " + msg if len(msg) else None
+        if self.i.output is None:
+            return [self.output.name]
+        else:
+            return []
 
     def reset(self):
         self.i.reset()
@@ -88,13 +107,14 @@ class BRAM:
     def __init__(self, size, name):
         self._called = False
 
+        self.name = name
         self.contents = [NULL for _ in range(size)]
 
-        self.i = Input(self, f"{name} i")
-        self.iaddr = Input(self, f"{name} iaddr")
+        self.i = Input(self, f"i")
+        self.iaddr = Input(self, f"iaddr")
 
-        self.o = Output(self, f"{name} o")
-        self.oaddr = Input(self, f"{name} oaddr")
+        self.o = Output(self, f"o")
+        self.oaddr = Input(self, f"oaddr")
 
     def write(self):
         i = self.i()
@@ -112,25 +132,26 @@ class BRAM:
         else:
             self.o.set(NULL)
 
-    def connected(self):
-        msg = ""
-        for idx, i in enumerate(self.i):
-            if not i.connected():
-                msg += f"i[{idx}] "
-        
-        for idx, o in enumerate(self.o):
-            if not o.connected():
-                msg += f"o[{idx}] "
+    def identifiers(self):
+        return [self.name, self.i.name, self.iaddr.name, self.o.name, self.oaddr.name]
 
-        for idx, i in enumerate(self.iaddr):
-            if not i.connected():
-                msg += f"iaddr[{idx}] "
-        
-        for idx, o in enumerate(self.oaddr):
-            if not o.connected():
-                msg += f"oaddr[{idx}] "
-        
-        return "BRAM: "+msg if len(msg) else None
+    def adjacencies(self):
+        return [
+                self.iaddr.adjacencies(),
+                [self.iaddr.name, self.name+"(i)"],
+                self.i.adjacencies(),
+                [self.i.name, self.name+"(i)"],
+                self.oaddr.adjacencies(),
+                [self.oaddr.name, self.name+"(o)"],
+                [self.name+"(o)", self.o.name]
+        ]
+
+    def connected(self):
+        ret = []
+        for i in [self.i, self.iaddr, self.oaddr]:
+            if i.output is None:
+                ret.append(i.name)
+        return ret
 
     def reset(self):
         self.i.reset()
@@ -142,12 +163,15 @@ class BRAM:
 
 
 class Logic(ABC):
-    def __init__(self):
+    def __init__(self, name):
         self._init = True
         self._called = False
         self._inputs = []
         self._outputs = []
-        self._pipeline = deque([])
+        self._pipeline = deque([]) 
+        self.name = name
+
+        self.empty = Output(self,"empty")
 
     def __setattr__(self, k, v):
         if k != "_init" and not hasattr(self,"_init"):
@@ -167,9 +191,7 @@ class Logic(ABC):
 
     def pipeline(self, n):
         self._pipeline = deque([[NULL for _ in self._outputs] for _ in range(n)])
-        if not hasattr(self,"empty"):
-            self.empty = Output(self, f"{type(self)} empty")
-
+ 
     def __call__(self):
         if self._called == True:
             return
@@ -178,27 +200,28 @@ class Logic(ABC):
         self.logic()
         self.empty.val = 0 # satisfy assertion below
         for o in self._outputs:
-            if o.val == None:
-                raise Exception(f"Output not set after calling logic unit for {type(self)}")
-       
+            passed = True
+            if o.val is None:
+                print(f"{o.name} is None after calling parent logic")
+                passed = False
+            if not passed:
+                raise Exception(f"Must set all Outputs to non-None in {self.name}.logic()")
+
         self._pipeline.append(
                 [o.val for o in self._outputs]
         )
-        self.empty.val = 1 if len(self._pipeline) == 0 else 0
+
+        empty = True
+        for outputs in self._pipeline:
+            for o in outputs:
+                if o is not NULL:
+                    empty = False
+
         for o, val in zip(self._outputs, self._pipeline.popleft()):
             o.val = val
-        
+        self.empty.val = empty
+  
 
-    def connected(self):
-        msg = ""
-        for idx, port in enumerate(self._inputs):
-            if not port.connected():
-                msg += f"i[{idx}] "
-        for idx, port in enumerate(self._outputs):
-            if not port.connected():
-                msg += f"o[{idx}] "
-        return f"{type(self)}: " + msg if len(msg) else None
-            
     def reset(self):
         for i in self._inputs:
             i.reset()
@@ -208,9 +231,23 @@ class Logic(ABC):
 
         self._called = False
 
+    def identifiers(self):
+        return [self.name] + [i.name for i in self._inputs] + [o.name for o in self._outputs]
+
+    def adjacencies(self):
+        return [i.adjacencies() for i in self._inputs] + [[i.name, self.name] for i in self._inputs] + [[self.name, o.name] for o in self._outputs]
+
+    def connected(self):
+        ret = []
+        for i in self._inputs:
+            if i.output is None:
+                ret.append(i)
+        return ret
+
 class MockFPGA:
     def __init__(self):
         self.units = []
+        self.validated = False
 
     def add(self, obj):
         t = type(obj)
@@ -222,18 +259,52 @@ class MockFPGA:
         return self.units[-1]
     
        
-    def verify_connections(self):
-        succ = True
-        msgs = [unit.connected() for unit in self.units]
-        for msg in msgs:
-            if msg is not None:
-                print(msg)
-                succ = False
+    def validate(self):
+        if not self.validate_identifiers():
+            print("validate_identifiers failed")
+            return False
+        if not self.validate_connections():
+            print("validate_connections failed")
+            return False
+        if not self.validate_dag():
+            print("validate_dag failed")
+            return False
+        return True
+
+    def validate_identifiers(self):
+        identifiers = []
+        [identifiers.extend(u.identifiers()) for u in self.units]
+        counts = {ident: 0 for ident in identifiers}
+        for ident in identifiers:
+            counts[ident] += 1
+
+        passed = True
+        for ident, c in counts.items():
+            if c != 1:
+                passed = False
+                print(f"{ident} is used {c} times (all identifiers should be unique)")
+        return passed
+
+    def validate_dag(self):
+        E = []
+        [E.extend(u.adjacencies()) for u in self.units]
+        return dfs(E)
         
-        if not succ:
-            raise Exception("verify_connections: circuit not fully connected")
-            
+    def validate_connections(self):
+        passed = True
+        for u in self.units:
+            msg = ", ".join(u.connected())
+            if len(msg):
+                print(msg)
+                passed = False
+        return passed
+                
     def clock(self):
+        if not self.validated:
+            if not self.validate():
+                raise Exception("Validation of FPGA failed")
+            self.validated = True
+
         for unit in self.units:
             unit()
 
@@ -253,3 +324,47 @@ def connect(o, i):
         raise ValueError(f"input belonging to {type(i.parent)} already has output belonging to {type(o.parent)}")
     o.inputs.append(i)
     i.output = o
+
+def dfs(E):
+    V = set()
+    for u, v in E:
+        V.add(u)
+        V.add(v)
+
+    adj = {u: [] for u in V}
+    for u, v in E:
+        adj[u].append(v)
+
+    color = {u: "w" for u in V}
+    pi = {u: None for u in V}
+    passed = True
+    cycled = {u: False for u in V}
+
+    def print_cycle(u):
+        if cycled[u]:
+            return
+        passed = False
+        msg = u
+        cur = pi[u]
+        while cur != u:
+            cycled[cur] = True
+            msg = f"{cur} -> {msg}"
+            cur = pi[cur]
+        print(msg)
+
+    def visit(u):
+        if color[u] == "g":
+            print_cycle(u)
+            return
+        color[u] = "g"
+        for v in adj[u]:
+                pi[v] = u
+                visit(v)
+        color[u] = "b"
+
+    for u in V:
+        if color[u] == "w":
+            visit(u)
+
+    return passed
+

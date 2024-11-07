@@ -15,6 +15,7 @@ position_update = "position update"
 
 class ControlUnit(Logic):
     def __init__(self):
+        super().__init__("control unit")
         self.t = 0 # current timestep
 
         self.phase = force_evaluation

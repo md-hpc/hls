@@ -44,9 +44,9 @@ for di in range(-1,2):
             N_FILTER += 1
 
 
-p_caches = [m.add(BRAM(512)) for _ in range(N_CELL)] # position cache
-a_caches = [m.add(BRAM(512)) for _ in range(N_CELL)] # acceleration cache
-v_caches = [m.add(BRAM(512)) for _ in range(N_CELL)] # velocity cache
+p_caches = [m.add(BRAM(512, f"p_cache{i}")) for i in range(N_CELL)] # position cache
+a_caches = [m.add(BRAM(512, f"a_cache{i}")) for i in range(N_CELL)] # acceleration cache
+v_caches = [m.add(BRAM(512, f"v_cache{i}")) for i in range(N_CELL)] # velocity cache
 
 # structs to hold particle data while it's passing through pipelines
 class Position:
@@ -75,8 +75,8 @@ def cell_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
 
 class ParticleFilter(Logic):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name):
+        super().__init__(name)
 
         self.reference = Input(self)
         self.neighbor = Input(self)
@@ -103,8 +103,8 @@ class ParticleFilter(Logic):
         )
  
  class ForcePipeline(Logic):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name):
+        super().__init__(name)
 
         self.i = Input(self)
 
@@ -134,5 +134,5 @@ class ParticleFilter(Logic):
         )
 
 # reference these in the phase{1,2} files
-filterBank = [ParticleFilter() for _ in range(N_FILTER)]
-forcePipeline = ForcePipeline()
+filter_bank = [ParticleFilter(f"filter{i}") for i in range(N_FILTER)]
+force_pipeline = ForcePipeline("FE")
