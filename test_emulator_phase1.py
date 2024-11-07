@@ -5,7 +5,7 @@ import hls # so we can set CONFIG_VERBOSE
 from test_structures_phase1 import *
 import phase1
 
-hls.CONFIG_VERBOSE = True
+hls.CONFIG_VERBOSE = False
 
 input_set = set()
 
@@ -55,7 +55,8 @@ for f, reg, i in zip(filter_bank, filter_empty, control_unit.filter_empty):
     connect(f.empty, reg.i)
     connect(reg.o, i)
 
-
+t = 0
 while control_unit.ready == 1:
+    print("======== Next Timestep ========")
     m.clock()
 print(len(force_pipeline.input_set))

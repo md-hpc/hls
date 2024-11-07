@@ -30,7 +30,7 @@ p_caches = [m.add(BRAM(512, f"pc{i}")) for i in range(N_CELL)] # position cache
 
 class NullConst(Logic):
     def __init__(self):
-        super().__init__("null const")
+        super().__init__("null-const")
         self.o = Output(self,"null")
 
     def logic(self):
@@ -48,6 +48,8 @@ class Position:
         self.cell = cell
         self.addr = addr
         self.r = r
+    def __str__(self):
+        return f"({self.cell}, {self.addr} -> {self.r})"
 
 class Velocity:
     def __init__(self, v, addr, cell):
@@ -86,7 +88,6 @@ filter_set = set()
 
 class ParticleFilter(Logic):
     def __init__(self, name):
-        print(name)
         super().__init__(name)
 
         self.reference = Input(self, "reference")

@@ -74,6 +74,19 @@ def linear_idx(i,j,k):
 def cell_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
 
+# given a linear idx of a cell cache, gives the linear index of all neighbors, including self
+class neighborhood:
+    def __init__(self, cidx):
+        self.cidx = cidx
+    def __iter__(self):
+        i, j, k = cell_idx(self.cidx)
+        for di in range(-1,2):
+            for dj in range(-1,2):
+                for dk in range(-1,2):
+                    if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
+                        continue
+                    yield linear_idx(i+di, j+dj, k+dk)
+
 class ParticleFilter(Logic):
     def __init__(self, name):
         super().__init__(name)

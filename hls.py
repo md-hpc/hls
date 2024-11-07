@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 import re
 
-NULL = []
+NULL = "NULL"
 
 empty_ident = re.compile(".*/empty")
 
@@ -17,6 +17,9 @@ class Input:
         self.parent = parent
         self.name = f"{parent.name}/{name}"
         self.output = None
+
+        if isinstance(self.parent, Logic):
+            self.parent._inputs.append(self)
 
     def __call__(self):
         debug("reading", self.name)
@@ -44,6 +47,10 @@ class Output:
         self.name = f"{parent.name}/{name}"
         self.inputs = []
 
+        if isinstance(self.parent, Logic):
+            self.parent._outputs.append(self)
+            self.parent._pipeline = deque([[NULL for _ in self.parent._outputs] for _ in self.parent._pipeline])
+    
     def __call__(self):
         debug("reading", self.name)
         if self.val is None:
@@ -60,6 +67,7 @@ class Output:
         return len(self.inputs) != 0
 
     def reset(self):
+        debug("reset", self.name)
         self.val = None
 
 class Register:
@@ -119,7 +127,7 @@ class BRAM:
     def write(self):
         i = self.i()
         iaddr = self.iaddr()
-        if x is not NULL and addr is not NULL:
+        if i is not NULL and addr is not NULL:
             self.contents[iaddr] = i
 
     def __call__(self):
@@ -170,18 +178,12 @@ class Logic(ABC):
         self._outputs = []
         self._pipeline = deque([]) 
         self.name = name
-
+        self.verbose = False
         self.empty = Output(self,"empty")
 
     def __setattr__(self, k, v):
         if k != "_init" and not hasattr(self,"_init"):
             raise Exception("Must call super().__init__() on hls.Logic before setting any attributes")
-
-        if type(v) is Input:
-            self._inputs.append(v)
-        if type(v) is Output:
-            self._outputs.append(v)
-            self._pipeline = deque([[NULL for _ in self._outputs] for _ in self._pipeline])
 
         super(Logic, self).__setattr__(k, v)
 
@@ -221,8 +223,14 @@ class Logic(ABC):
             o.val = val
         self.empty.val = empty
   
+        if self.verbose:
+            print(f"{self.name}:")
+            for o in self._outputs:
+                print(f"\t{o.name.split('/')[1]}: {o.val}")
+
 
     def reset(self):
+        debug("reset", self.name)
         for i in self._inputs:
             i.reset()
 
@@ -258,7 +266,23 @@ class MockFPGA:
         )
         return self.units[-1]
     
-       
+                 
+    def clock(self):
+        if not self.validated:
+            if not self.validate():
+                raise Exception("Validation of FPGA failed")
+            self.validated = True
+
+        for unit in self.units:
+            unit()
+
+        for unit in self.units:
+            if type(unit) is BRAM or type(unit) is Register:
+                unit.write()
+
+        for unit in self.units:
+            unit.reset()
+      
     def validate(self):
         if not self.validate_identifiers():
             print("validate_identifiers failed")
@@ -298,22 +322,6 @@ class MockFPGA:
                 print(msg)
                 passed = False
         return passed
-                
-    def clock(self):
-        if not self.validated:
-            if not self.validate():
-                raise Exception("Validation of FPGA failed")
-            self.validated = True
-
-        for unit in self.units:
-            unit()
-
-        for unit in self.units:
-            if type(unit) is BRAM or type(unit) is Register:
-                unit.write()
-
-        for unit in self.units:
-            unit.reset()
 
 def connect(o, i):
     if type(o) is not Output:
