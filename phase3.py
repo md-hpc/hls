@@ -29,43 +29,40 @@ CTL_POSITION_UPDATE_DONE = Output # write 1 when your units are done evaluating 
 dT = 1
 class PositionController(Logic):
     def __init__(self):
-        super().__init__()
-        self.ctl_force_position_update_ready = Input(self,"")
-        self.ctl_double_buffer = Input(self,"")
-        self.ctl_position_update_done = Output(self,"")
+        super().__init__("PositionController")
+        self.ctl_force_position_update_ready = Input(self,"PS_FPUR")
+        self.ctl_double_buffer = Input(self,"PS_DB")
+        self.ctl_position_update_done = Output(self,"PS_PUD")
 		
-        self.current_position = [Input(self,"") for _ in range(N_CELL)]
-        self.current_velocity = [Input(self,"") for _ in range(N_CELL)]
-        self.next_position = [Output(self,"") for _ in range(N_CELL)]
-        self.next_velocity = [Output(self,"") for _ in range(N_CELL)]
-        self.nextAddr = Output(self,"")
-        self.update_address = [Output(self,"") for _ in range(N_CELL)]
-        self.current_address = Input(self,"")
+        self.current_position = [Input(self,"PS_current_position_"+str(i)) for i in range(N_CELL)]
+        self.current_velocity = [Input(self,"PS_current_velocity_"+str(i)) for i in range(N_CELL)]
+        self.next_position = [Output(self,"PS_next_position_"+str(i)) for i in range(N_CELL)]
+        self.next_velocity = [Output(self,"PS_next_velocity_"+str(i)) for i in range(N_CELL)]
+        self.nextAddr = Output(self,"PS_nextAddr_")
+        self.update_address = [Output(self,"PS_update_address_"+str(i)) for i in range(N_CELL)]
+        self.current_address = Input(self,"PS_current_address_")
 		
-        self.cidx = Input(self,"")
+        self.cidx = Input(self,"PS_cidx")
 		
-        self.current_cell = Input(self,"")
-        self.next_cell = Output(self,"")
+        self.current_cell = Input(self,"PS_current_cell")
+        self.next_cell = Output(self,"PS_next_cell")
 		
-        self.hasCleared = Input(self,"")
-        self.Cleared = Output(self,"")
+        self.hasCleared = Input(self,"PS_hasCleared")
+        self.Cleared = Output(self,"PS_Cleared")
         
-        self.currentClear = Input(self,"")
-        self.nextClear = Output(self,"")
+        self.currentClear = Input(self,"PS_currentClear")
+        self.nextClear = Output(self,"PS_nextClear")
     def logic(self):
 		
         if(self.ctl_force_position_update_ready.get()):
 			
             if(hasCleared.get() == 0):
                 print("HELLO")
-                for i in range(N_CELL):
-                    if(self.currentClear.get() == 255):
-                        self.Cleared.set(1)
-                        
+                if(self.currentClear.get() == 255):
+                    self.Cleared.set(1)
+                self.nextClear(self.currentClear.get()+1)
+                for i in range(N_CELL):                        
                     self.update_address[i].set((1 - self.ctl_double_buffer)  * 256 + self.currentClear.get())
-                    self.nextClear(self.currentClear.get()+1)
-                    
-
                     self.next_position[i].set(NULL)
                     self.next_velocity[i].set(NULL)
 
@@ -73,7 +70,6 @@ class PositionController(Logic):
                 r = self.current_position[self.current_cell.get()].get()
                 #if(r != NULL and v != NULL)
                 v = self.current_velocity[self.current_cell.get()].get()
-
                 if(r == NULL or v == NULL or self.current_address.get() == 256):
                     if(self.current_address.get() == 256):
                         raise("There are 256 particles in this cell")
@@ -102,21 +98,21 @@ CTL_POSITION_UPDATE_DONE = readController.ctl_position_update_done
 
 
 
-cidx = [m.add(Register("")) for _ in range(N_CELL)]
+cidx = [m.add(Register("cidx_" + str(i))) for i in range(N_CELL)]
 for i in range(len(cidx)):
 	cidx[i].contents = 0
 
-memClear = m.add(Register(""))
+memClear = m.add(Register("memClear"))
 memClear.contents = 0
 
-clearCounter = m.add(Register(""))
+clearCounter = m.add(Register("clearCounter"))
 clearCounter.contents = 0
 
-current_cell = m.add(Register(""))
+current_cell = m.add(Register("ccell"))
 current_cell.contents = 0
-ptrVel = m.add(Register(""))
-ptrPos = m.add(Register(""))
-addr = m.add(Register(""))
+ptrVel = m.add(Register("ptrVel"))
+ptrPos = m.add(Register("ptrPos"))
+addr = m.add(Register("addr"))
 addr.contents = 0
 # addr+1 -> ptr -> addr
 connect(readController.nextAddr, ptrVel.i)
@@ -158,6 +154,7 @@ for _ in range(N):
     p_caches[idx].contents[init_cidx[idx]] = r
     v_caches[idx].contents[init_cidx[idx]] = v
     init_cidx[idx] += 1
+
 
 for i in range(256):
 	m.clock()
