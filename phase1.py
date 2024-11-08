@@ -52,20 +52,21 @@ class PositionReadController(Logic):
         
         # self.verbose = True
     def halt(self):
-        self._next_timestep = True
-        self.ctl_force_evaluation_done.set(1)
+        self.ctl_force_evaluation_done.set(True)
         self.oaddr.set(NULL)
         self.cell_r.set(NULL)
         self.new_reference.set(NULL)
         
     def logic(self):
         ctl_force_evaluation_ready = self.ctl_force_evaluation_ready.get() 
+
         if ctl_force_evaluation_ready and self._cell_r == N_CELL:
             self.halt()
             return
-
+        
         if not ctl_force_evaluation_ready:
             self._next_timestep = True
+            self._cell_r = 0
             self.halt()
             return
 
@@ -110,7 +111,7 @@ class PositionReadController(Logic):
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)
         self.oaddr.set(addr)
-        self.ctl_force_evaluation_done.set(0)
+        self.ctl_force_evaluation_done.set(False)
 
 class PositionReader(Logic):
     def __init__(self):

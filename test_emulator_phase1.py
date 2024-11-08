@@ -29,16 +29,16 @@ class ControlUnit(Logic):
 
         self.filter_empty = [Input(self, f"filter-empty-{i}") for i in range(N_FILTER)]
 
-        self.ready = 1
+        self.ready = True
  
-        self.verbose = False
+        self.verbose = True
 
     def logic(self):
         done = self.force_evaluation_done.get()
         filter_empty = all([i.get() for i in self.filter_empty])
          
         if done and filter_empty:
-            self.ready = 0
+            self.ready = False
 
         self.double_buffer.set(0)
         self.force_evaluation_ready.set(self.ready)
@@ -51,7 +51,7 @@ connect(control_unit.double_buffer, phase1.CTL_DOUBLE_BUFFER)
 connect(control_unit.force_evaluation_ready, phase1.CTL_FORCE_EVALUATION_READY)
 
 connect(phase1.CTL_FORCE_EVALUATION_DONE, force_evaluation_done.i)
-force_evaluation_done.contents = 0
+force_evaluation_done.contents = False
 
 connect(force_evaluation_done.o, control_unit.force_evaluation_done)
 for f, reg, i in zip(filter_bank, filter_empty, control_unit.filter_empty):
@@ -59,10 +59,20 @@ for f, reg, i in zip(filter_bank, filter_empty, control_unit.filter_empty):
     connect(reg.o, i)
 
 t = 0
-while control_unit.ready == 1:
+while control_unit.ready:
     print("======== Next Timestep ========")
     t += 1
     m.clock()
+
+m.clock()
+
+control_unit.ready = True
+force_evaluation_done.contents = False
+while control_unit.ready:
+    print("======== Next Timestep ========")
+    t += 1
+    m.clock()
+
 print(t)
 print(len(force_pipeline.input_set))
 print(len(input_set))
