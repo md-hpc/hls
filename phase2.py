@@ -1,10 +1,5 @@
 from hls import *
-import sys
-
-if "-t" in sys.argv:
-    from t12_structures import *
-else:
-    from structures import *
+from structures import *
 
 # PHASE 2: force pipeline read/acceleration cache write AND acceleration & velocity cache read AND velocity cache write
 
@@ -36,6 +31,7 @@ class VelocityUpdateController(Logic):
         if not ctl_velocity_update_ready:
             self.oaddr.set(NULL)
             self.ctl_velocity_update_done.set(NULL)
+            return
 
         updater_done = self.updater_done.get()
 
@@ -43,7 +39,8 @@ class VelocityUpdateController(Logic):
             self._oaddr = 0
             self.oaddr.set(NULL)
             self.ctl_velocity_update_done.set(True)
-        
+            return
+
         self.oaddr.set(self._oaddr)
         self._oaddr += 1
 
@@ -62,7 +59,6 @@ class VelocityUpdater(Logic):
         for a, vi, vo in zip(self.a, self.vi, self.vo):
             _a = a.get()
             _vi = vi.get()
-            _vo = vo.get()
             
             if _a is NULL:
                 vo.set(NULL)
@@ -92,15 +88,15 @@ connect(velocity_updater.updater_done, updater_done.i)
 
 # a_muxes input
 for i in range(N_CELL):
-    connect(velocity_update_controller.oaddr, a_muxes[i].oaddr_p2)
-    connect(null_const.o, a_muxes[i].iaddr_p2)
-    connect(null_const.o, a_muxes[i].i_p2)
+    connect(velocity_update_controller.oaddr, a_omuxes[i].oaddr_p2)
+    connect(null_const.o, a_imuxes[i].iaddr_p2)
+    connect(null_const.o, a_imuxes[i].i_p2)
 
 # v_muxes input
 for i in range(N_CELL):
-    connect(velocity_update_controller.oaddr, v_muxes[i].oaddr_p2)
-    connect(velocity_update_controller.oaddr, v_muxes[i].iaddr_p2)
-    connect(velocity_updater.vo[i], v_muxes[i].i_p2)
+    connect(velocity_update_controller.oaddr, v_omuxes[i].oaddr_p2)
+    connect(velocity_update_controller.oaddr, v_imuxes[i].iaddr_p2)
+    connect(velocity_updater.vo[i], v_imuxes[i].i_p2)
 
 # control_unit inputs
 CTL_VELOCITY_UPDATE_DONE = velocity_updater.updater_done

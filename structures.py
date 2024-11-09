@@ -69,69 +69,7 @@ def linear_idx(i,j,k):
 def cell_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
 
-class ParticleFilter(Logic):
-    def __init__(self):
-        super().__init__("Particle Filter")
-
-        self.reference = Input(self,"PF_Reference")
-        self.neighbor = Input(self,"PF_Neighbor")
-
-        self.pair = Output(self,"PF_Pair")
-
-        self.pipeline(FILTER_PIPELINE_STAGES)
-
-    def logic(self):
-        r = self.reference.get()
-        n = self.neighbor.get()
-        halt = self.halt.get()
-
-        if r is NULL or n is NULL:
-            self.pair.set(NULL)
-            return
-
-        r = math.sqrt(sum([
-            (r1 - r2)**2 for r1, r2 in zip(r.r, n.r)
-        ]))
-
-        self.pair.set(
-                (r, n) if r < CUTOFF else NULL
-        )
- 
-class ForcePipeline(Logic):
-    def __init__(self):
-        super().__init__("Force Pipeline")
-        
-        self.i = Input(self,"FP_input")
-
-        self.reference = Output(self,"FP_Reference")
-        self.neighbor = Output(self,"FP_Neigbor")
-        
-        self.pipeline(FORCE_PIPELINE_STAGES)
-
-    def logic(self):
-        i = self.i.get()
-        if i is NULL:
-            self.reference.set(NULL)
-            self.neighbor.set(NULL)
-            return
-
-        ref, neighbor = self.i.get()
-        l2 = lambda v1, v2: math.sqrt(sum([(r1-r2)**2 for r1, r2 in zip(v1, v2)]))
-        r = l2(ref.r, neighbor.r)
-        f = 4*EPSILON*((SIGMA/r)**12-(SIGMA/r)**6)*(ref.r - neighbor.r)/r
-        
-        self.reference.set(
-            Acceleration(cell = ref_cell, addr = ref_addr, a = f)
-        )
-
-        self.neighbor.set(
-            Acceleration(cell = neighbor_cell, addr = neighbor_addr, a = -1.0*f)
-        )
-
-
-# Following in the pattern of trying to be as explicit as is practical
-# we provide each cache mux type explicitly
-class CacheMux(Logic):
+class CacheMuxI(Logic):
     def __init__(self, name, idents, ctl_idents):
         super().__init__(name)
 
@@ -141,32 +79,58 @@ class CacheMux(Logic):
         for ident, ctl_ident in zip(idents, ctl_idents):
             setattr(self,f"i_{ident}", Input(self,f"i-{ident}"))
             setattr(self,f"iaddr_{ident}", Input(self,f"iaddr-{ident}"))
-            setattr(self,f"oaddr_{ident}", Input(self,f"oaddr-{ident}"))
             setattr(self, ctl_ident.replace("-","_"), Input(self, ctl_ident))
             self.opts.append(
                 [
                     getattr(self,ctl_ident.replace("-","_")),
-                    [getattr(self,f"{prefix}_{ident}") for prefix in ["i", "iaddr", "oaddr"]]
+                    [getattr(self,f"{prefix}_{ident}") for prefix in ["i", "iaddr"]]
                 ]
             )
 
         self.i = Output(self, "i")
         self.iaddr = Output(self, "iaddr")
-        self.oaddr = Output(self, "oaddr")
 
     def logic(self):
         halt = True
         for opt in self.opts:
-            if not opt[0].get():
+            if opt[0].get() != True:
                 continue
             halt = False
             self.i.set(opt[1][0].get())
             self.iaddr.set(opt[1][1].get())
-            self.oaddr.set(opt[1][2].get())
         if halt:
             self.i.set(NULL)
             self.iaddr.set(NULL)
+
+class CacheMuxO(Logic):
+    def __init__(self, name, idents, ctl_idents):
+        super().__init__(name)
+
+        assert len(idents) == len(ctl_idents)
+
+        self.opts = []
+        for ident, ctl_ident in zip(idents, ctl_idents):
+            setattr(self,f"oaddr_{ident}", Input(self,f"oaddr-{ident}"))
+            setattr(self, ctl_ident.replace("-","_"), Input(self, ctl_ident))
+            self.opts.append(
+                [
+                    getattr(self,ctl_ident.replace("-","_")),
+                    getattr(self,f"oaddr_{ident}")
+                ]
+            )
+
+        self.oaddr = Output(self,"oaddr")
+
+    def logic(self):
+        halt = True
+        for opt in self.opts:
+            if opt[0].get() != True:
+                continue
+            halt = False
+            self.oaddr.set(opt[1].get())
+        if halt:
             self.oaddr.set(NULL)
+
 
 class NullConst(Logic):
     def __init__(self):
@@ -177,20 +141,40 @@ class NullConst(Logic):
     def logic(self):
         self.o.set(NULL)
 
+class And(Logic):
+    def __init__(self,n,name):
+        super().__init__(name)
+
+        self.i = [Input(self,f"i{i}") for i in range(n)]
+        self.o = Output(self,"o")
+
+    def logic(self):
+        self.o.set(
+            all([i.get() for i in self.i])
+        )
+
 def init_bram(ident, mux_idents, mux_ctl_idents):
     caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
-    muxes = [m.add(CacheMux(f"{ident}-mux-{i}", mux_idents, mux_ctl_idents)) for i in range(N_CELL)]
-    for mux, cache in zip(muxes, caches):
-        connect(mux.i, cache.i)
-        connect(mux.iaddr, cache.iaddr)
-        connect(mux.oaddr, cache.oaddr)
-    return caches, muxes
+    imuxes = [m.add(CacheMuxI(f"{ident}-imux-{i}", mux_idents, mux_ctl_idents)) for i in range(N_CELL)]
+    omuxes = [m.add(CacheMuxO(f"{ident}-omux-{i}", mux_idents, mux_ctl_idents)) for i in range(N_CELL)]
+    for imux, omux, cache in zip(imuxes, omuxes, caches):
+        connect(imux.i, cache.i)
+        connect(imux.iaddr, cache.iaddr)
+        connect(omux.oaddr, cache.oaddr)
+    return caches, imuxes, omuxes
 
-p_caches, p_muxes = init_bram("p", ["p3","p1"], ["clt-position-update-ready","ctl-force-evaluation-ready"])
-a_caches, a_muxes = init_bram("a", ["p1","p2"], ["ctl-force-evaluation-ready", "ctl-velocity-update-ready"])
-v_caches, v_muxes = init_bram("v", ["p2","p3"], ["ctl-velocity-update-ready","ctl-position-update-ready"])
+class concat:
+    def __init__(self, *iters):
+        self.iters = iters
+
+    def __iter__(self):
+        for it in self.iters:
+            for x in it:
+                yield x
+
+p_caches, p_imuxes, p_omuxes = init_bram("p", ["p3","p1"], ["ctl-position-update-ready","ctl-force-evaluation-ready"])
+a_caches, a_imuxes, a_omuxes = init_bram("a", ["p1","p2"], ["ctl-force-evaluation-ready", "ctl-velocity-update-ready"])
+v_caches, v_imuxes, v_omuxes = init_bram("v", ["p2","p3"], ["ctl-velocity-update-ready","ctl-position-update-ready"])
 
 # reference these in the phase{1,2,3} files
-filter_bank = [m.add(ParticleFilter()) for _ in range(N_FILTER)]
-force_pipeline = m.add(ForcePipeline())
 null_const = m.add(NullConst())
