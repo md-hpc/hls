@@ -2,7 +2,7 @@ import sys
 from hls import *
 
 if "-t" in sys.argv:
-    from t12_structures import *
+    from test_structures_phase1 import *
 else:
     from structures import *
 
@@ -26,7 +26,7 @@ CTL_DOUBLE_BUFFER = Input
 CTL_FORCE_EVALUATION_READY = Input # reads as 1 when force evaluation should begin/continue, otherwise 0
 CTL_FORCE_EVALUATION_DONE = Output # write 1 when your units are done evaluating forces, otherwise write 0
 
-
+# ==== PHASE 1.1: Force evaluation ====
 class PositionReadController(Logic):
     def __init__(self):
         super().__init__("position-read-controller")
@@ -175,9 +175,113 @@ class PairQueue(Logic):
                 self.queue.pop(0)
         )
 
+class AccelerationUpdateController(Logic):
+    def __init__(self):
+        super().__init__("reference-accumulator")
+        self.reference = Input(self, "reference")
+        self.neighbor = Input(self, "neighbor")
+        self._r = None
+        self._queue = []
+        self.o = Output(self, "o")
+        self.oaddr = Output(self, "oaddr")
+
+        self.force_pipeline_empty = Input(self, "force-pipeline-empty")
+        self.position_writer_done = Input(self, "position-writer-done")
+
+    def logic(self):
+        reference = self.reference.get()
+        neighbor = self.neighbor.get()
+
+        if self._r is not None and self.position_writer_done.get() and self.force_pipeline_empty.get():
+            self._queue.append(self._r)
+            self._r = None
+        if reference is not NULL:    
+            if reference.addr != self._r.addr or reference.cell != self._r.cell:
+                self._queue.append(self._r)
+                self._r = reference
+            else:
+                self._r.a = [a1+a2 for a1, a2 in zip(self._r.a, reference.a)]
+
+        if len(self._queue) == 0:
+            self.o.set(NULL)
+            for o in self.oaddr:
+                o.set(NULL)
+            return
+
+        acceleration = self._queue.pop(0)
+
+        self.oaddr.set(acceleration.addr)
+        self.o.set(acceleration)
+
+class AccelerationUpdater(Logic):
+    def __init__(self):
+        super().__init__("acceleration-updater")
+        self.fragment = Input(self,"i")
+        self.ai = [Input(self,"i{i}") for i in range(N_CELL)]
+        self.ao = [Output(self,"o{i}") for i in range(N_CELL)]
+    
+    def logic(self):
+        fragment = self.fragment.get()
+        if fragment is NULL:
+            for o in self.ao:
+                o.set(NULL)
+            return
+
+        a = [a1+a2 for a1, a2 in zip(fragment.a, self.ai[fragment.cell])]
+        for idx, o in self.ao:
+            if idx == fragment.cell:
+                o.set(a)
+            else:
+                o.set(NULL)
+
+# ==== PHASE 2: Velocity Update ====
+# ==== PHASE 1/2: Acceleration Cache Muxing ====
+
+class AccelerationCacheMux(Logic):
+    def __init__(self,i):
+        super().__init__(f"acceleration-cache-mux-{i}")
+
+        self.ctl_force_evaulation_ready = Input(self,"force-evaluation-ready")
+        self.ctl_velocity_update_ready = Input(self, "velocity-update-ready")
+
+        self.i_p1 = Input(self,"i-p1")
+        self.iaddr_p1 = Input(self, "iaddr-p1")
+        self.oaddr_p1 = Input(self, "oaddr-p1")
+
+        self.i_p2 = Input(self,"i-p2")
+        self.iaddr_p1 = Input(self, "iaddr-p2")
+        self.oaddr_p2 = Input(self, "oaddr-p2")
+
+        self.i = Output(self,"i")
+        self.iaddr = Output(self, "iaddr")
+        self.oaddr = Output(self, "oaddr")
+
+    def logic(self):
+        if self.ctl_force_evaluation_ready.get():
+            self.i.set(self.i_p1.get())
+            self.iaddr.set(self.iaddr_p1.get())
+            self.oaddr.set(self.oaddr_p1.get())
+        elif self.ctl_velocity_update_ready.get():
+            self.i.set(self.i_p2.get())
+            self.iaddr.set(self.iaddr_p2.get())
+            self.oaddr.set(self.oaddr_p2.get())
+        else:
+            self.i.set(NULL)
+            self.iaddr.set(NULL)
+            self.oaddr.set(NULL)
+                 
+
 position_read_controller = m.add(PositionReadController())
 position_reader = m.add(PositionReader())
 pair_queue = m.add(PairQueue())
+
+acceleration_update_controller = m.add(AccelerationUpdateController())
+acceleration_updater = m.add(AccelerationUpdater())
+
+velocity_update_controller = m.add(VelocityUpdateController())
+velocity_updater = m.add(VelocityUpdater())
+
+acceleration_cache_mux = [m.add(AccelerationCacheMux(i)) for i in range(N_CELL)]
 
 # is True when
 # all neighbor particles read last cycle were NULL
@@ -186,7 +290,7 @@ pair_queue = m.add(PairQueue())
 # - indicates that current reference cell is stale
 stale_reference = m.add(Register("stale-reference")) 
 
-# holds reference particle
+# holds reference particle for filter bank
 reference = m.add(Register("reference"))
 
 # position_read_controller inputs (ommiting control signals from emulator.py)
@@ -205,11 +309,9 @@ connect(position_reader.stale_reference, stale_reference.i)
 # reference input
 connect(position_reader.reference, reference.i)
 
-# p_muxes inputs
-for mux in p_muxes:
-    connect(position_read_controller.oaddr, mux.oaddr_p1)
-    connect(null_const.o, mux.iaddr_p1)
-    connect(null_const.o, mux.i_p1)
+# address p_caches
+for p_cache in p_caches:
+    connect(position_read_controller.oaddr, p_cache.oaddr)
 
 # filter_bank inputs
 for o, f in zip(position_reader.o, filter_bank):
@@ -223,7 +325,13 @@ for f, i in zip(filter_bank, pair_queue.i):
 # force_pipeline inputs
 connect(pair_queue.o, force_pipeline.i)
 
-# IO for emulator.py
-CTL_DOUBLE_BUFFER = position_read_controller.ctl_double_buffer
-CTL_FORCE_EVALUATION_READY = position_read_controller.ctl_force_evaluation_ready 
-CTL_FORCE_EVALUATION_DONE = position_read_controller.ctl_force_evaluation_done
+# acceleration_update_controller inputs
+connect(force_pipeline.reference, acceleration_update_controller.reference)
+connect(force_pipeline.neighbor, acceleration_update_controller.neighbor)
+connect(force_pipeline.empty, acceleration_update_controller.force_pipeline_empty)
+connect(position_read_controller.ctl_force_evaluation_done, acceleration_update_controller.position_writer_done)
+
+# acceleration_updater inputs
+connect(acceleration_update_controller.o, acceleration_updater.fragment)
+for a_cache, i in zip(a_caches, acceleration_updater.ai):
+    connect(a_cache.o, i)

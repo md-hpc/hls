@@ -333,7 +333,7 @@ def connect(o, i):
     if type(i) is not Input:
         raise TypeError("Connected input is not type Input()")
     if i.output is not None:
-        raise ValueError(f"input belonging to {type(i.parent)} already has output belonging to {type(o.parent)}")
+        raise ValueError(f"{i.name} already receiving output from {o.name}")
     o.inputs.append(i)
     i.output = o
 

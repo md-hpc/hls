@@ -2,7 +2,6 @@ from hls import *
 
 import phase1
 import phase2
-import phase3
 
 from structures import *
 
@@ -66,10 +65,10 @@ class ControlUnit(Logic):
 # control_unit outputs need to be buffered in registers so we don't form cycles
 # 
 # we could equivalently buffer control_unit inputs, but it's not as easy to manage
-double_buffer = m.add(Register())
-force_evaluation = m.add(Register())
-velocity_update = m.add(Register())
-position_update = m.add(Register())
+double_buffer = m.add(Register("double-buffer"))
+force_evaluation = m.add(Register("force-evaluation"))
+velocity_update = m.add(Register("velocity-update"))
+position_update = m.add(Register("position-update"))
 
 control_unit = m.add(ControlUnit())
 
