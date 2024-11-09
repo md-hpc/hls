@@ -79,9 +79,11 @@ class Register:
         self.o = Output(self, f"o")
 
     def write(self):
-        x = self.i()
-        if x is not NULL:
-            self.contents = self.i()
+        i = self.i()
+        if i is not NULL:
+            if i is RESET:
+                i = NULL
+            self.contents = i
 
     def __call__(self):
         if self._called:
@@ -128,6 +130,8 @@ class BRAM:
         i = self.i()
         iaddr = self.iaddr()
         if i is not NULL and addr is not NULL:
+            if i is RESET:
+                i = NULL
             self.contents[iaddr] = i
 
     def __call__(self):
