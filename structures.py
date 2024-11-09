@@ -29,8 +29,8 @@ EPSILON = 1.0 # LJ const
 SIGMA = 1.0 # LJ const
 
 # depth of computation pipelines. Your emulator should be robust to any value of these
-FORCE_PIPELINE_STAGES = 70 
-FILTER_PIPELINE_STAGES = 9  
+FORCE_PIPELINE_STAGES = 0
+FILTER_PIPELINE_STAGES = 0  
 
 # derrived from above
 N_CELL = UNIVERSE_SIZE ** 3
@@ -44,51 +44,66 @@ for di in range(-1,2):
             N_FILTER += 1
 
 # structs to hold particle data while it's passing through pipelines
-class Position:
-    def __init__(self, r, addr, cell):
+class Struct:
+    def __init__(self, data, addr, cell, ident):
         self.cell = cell
         self.addr = addr
-        self.r = r
+        self.ident = ident
+        setattr(self, ident, data)
 
-class Velocity:
-    def __init__(self, v, addr, cell):
-        self.cell = cell
-        self.addr = addr
-        self.v = v
+    def __eq__(self, obj):
+        return self.ident == obj.ident and self.cell == obj.cell and self.addr == obj.addr
+    
+    def __str__(self):
+        return f"({self.cell}, {self.addr}), {getattr(self,self.ident)}"
 
-class Acceleration:
-    def __init__(self, a, addr, cell):
-        self.cell = cell
-        self.addr = addr
-        self.a = a
+Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
+Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
+Acceleration = lambda a, addr, cell: Struct(a, addr, cell, "a")
+
 
 # converts (i,j,k) tuple to linear idx and back
 def linear_idx(i,j,k):
     return (i%UNIVERSE_SIZE) + (j%UNIVERSE_SIZE)*UNIVERSE_SIZE + (k%UNIVERSE_SIZE)*UNIVERSE_SIZE**2
 
-def cell_idx(i):
+def cubic_idx(i):
     return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
 
-class CacheMuxI(Logic):
-    def __init__(self, name, idents, ctl_idents):
+class neighborhood:
+    def __init__(self, cell):
+        self.cell = cell
+    def __iter__(self):
+        i, j, k = cubic_idx(self.cell)
+        for di in range(-1,2):
+            for dj in range(-1,2):
+                for dk in range(-1,2):
+                    if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
+                        continue
+                    yield linear_idx(i+di, j+dj, k+dk)
+
+# if you're confused about what this does, ask me (Vance)
+class CacheMux(Logic):
+    def __init__(self, name, idents, prefixes):
         super().__init__(name)
-
-        assert len(idents) == len(ctl_idents)
-
+        
         self.opts = []
-        for ident, ctl_ident in zip(idents, ctl_idents):
-            setattr(self,f"i_{ident}", Input(self,f"i-{ident}"))
-            setattr(self,f"iaddr_{ident}", Input(self,f"iaddr-{ident}"))
-            setattr(self, ctl_ident.replace("-","_"), Input(self, ctl_ident))
-            self.opts.append(
-                [
-                    getattr(self,ctl_ident.replace("-","_")),
-                    [getattr(self,f"{prefix}_{ident}") for prefix in ["i", "iaddr"]]
-                ]
-            )
+        for ident in idents:
+            ctl = Input(self, f"{ident}-ready")
+            setattr(self, f"{ident}_ready", ctl)
+            
+            inputs = []
+            for prefix in prefixes:
+                i = Input(self,f"{prefix}-{ident}")
+                setattr(self, f"{prefix}_{ident}", i)
+                inputs.append(i)
+            
+            self.opts.append([ctl, inputs])
 
-        self.i = Output(self, "i")
-        self.iaddr = Output(self, "iaddr")
+        self.o = []
+        for prefix in prefixes:
+            o = Output(self,prefix)
+            setattr(self, prefix, o)
+            self.o.append(o)
 
     def logic(self):
         halt = True
@@ -96,41 +111,12 @@ class CacheMuxI(Logic):
             if opt[0].get() != True:
                 continue
             halt = False
-            self.i.set(opt[1][0].get())
-            self.iaddr.set(opt[1][1].get())
+            for i, o in zip(opt[1], self.o):
+                o.set(i.get())
+
         if halt:
-            self.i.set(NULL)
-            self.iaddr.set(NULL)
-
-class CacheMuxO(Logic):
-    def __init__(self, name, idents, ctl_idents):
-        super().__init__(name)
-
-        assert len(idents) == len(ctl_idents)
-
-        self.opts = []
-        for ident, ctl_ident in zip(idents, ctl_idents):
-            setattr(self,f"oaddr_{ident}", Input(self,f"oaddr-{ident}"))
-            setattr(self, ctl_ident.replace("-","_"), Input(self, ctl_ident))
-            self.opts.append(
-                [
-                    getattr(self,ctl_ident.replace("-","_")),
-                    getattr(self,f"oaddr_{ident}")
-                ]
-            )
-
-        self.oaddr = Output(self,"oaddr")
-
-    def logic(self):
-        halt = True
-        for opt in self.opts:
-            if opt[0].get() != True:
-                continue
-            halt = False
-            self.oaddr.set(opt[1].get())
-        if halt:
-            self.oaddr.set(NULL)
-
+            for o in self.o:
+                o.set(NULL)
 
 class NullConst(Logic):
     def __init__(self):
@@ -153,10 +139,10 @@ class And(Logic):
             all([i.get() for i in self.i])
         )
 
-def init_bram(ident, mux_idents, mux_ctl_idents):
+def init_bram(ident, mux_idents):
     caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
-    imuxes = [m.add(CacheMuxI(f"{ident}-imux-{i}", mux_idents, mux_ctl_idents)) for i in range(N_CELL)]
-    omuxes = [m.add(CacheMuxO(f"{ident}-omux-{i}", mux_idents, mux_ctl_idents)) for i in range(N_CELL)]
+    imuxes = [m.add(CacheMux(f"{ident}-imux-{i}", mux_idents, ["i","iaddr"])) for i in range(N_CELL)]
+    omuxes = [m.add(CacheMux(f"{ident}-omux-{i}", mux_idents, ["oaddr"])) for i in range(N_CELL)]
     for imux, omux, cache in zip(imuxes, omuxes, caches):
         connect(imux.i, cache.i)
         connect(imux.iaddr, cache.iaddr)
@@ -172,9 +158,9 @@ class concat:
             for x in it:
                 yield x
 
-p_caches, p_imuxes, p_omuxes = init_bram("p", ["p3","p1"], ["ctl-position-update-ready","ctl-force-evaluation-ready"])
-a_caches, a_imuxes, a_omuxes = init_bram("a", ["p1","p2"], ["ctl-force-evaluation-ready", "ctl-velocity-update-ready"])
-v_caches, v_imuxes, v_omuxes = init_bram("v", ["p2","p3"], ["ctl-velocity-update-ready","ctl-position-update-ready"])
+p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
+a_caches, a_imuxes, a_omuxes = init_bram("a", ["phase1","phase2"])
+v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase2","phase3"])
 
 # reference these in the phase{1,2,3} files
 null_const = m.add(NullConst())

@@ -1,5 +1,6 @@
 from hls import *
 from structures import *
+import numpy
 
 # PHASE 2: force pipeline read/acceleration cache write AND acceleration & velocity cache read AND velocity cache write
 
@@ -10,8 +11,8 @@ from structures import *
 # e.g. if you're accessing address 13 of a givne BRAM, and the bit is 0, you will just access address 13
 # but if bit is 1, you will access address 13 + 256 = 269 instead.
 
-CTL_VELOCITY_UPDATE_READY = Input # read as 1 when velocity update should begin/continue, otherwise 0
-CTL_VELOCITY_UPDATE_DONE = Output # write 1 when your units are done evaluating velocity, otherwise write 0
+CTL_READY = Input # read as 1 when velocity update should begin/continue, otherwise 0
+CTL_DONE = Output # write 1 when your units are done evaluating velocity, otherwise write 0
 
 class VelocityUpdateController(Logic):
     def __init__(self):
@@ -22,27 +23,27 @@ class VelocityUpdateController(Logic):
 
         self.updater_done = Input(self, "writer-done")
 
-        self._oaddr = 0
-        self.oaddr = Output(self, "oaddr")
+        self._addr = 0
+        self.addr = Output(self, "oaddr")
 
     def logic(self):
         ctl_velocity_update_ready = self.ctl_velocity_update_ready.get()
 
         if not ctl_velocity_update_ready:
-            self.oaddr.set(NULL)
+            self.addr.set(NULL)
             self.ctl_velocity_update_done.set(NULL)
             return
 
         updater_done = self.updater_done.get()
 
         if updater_done:
-            self._oaddr = 0
-            self.oaddr.set(NULL)
+            self._addr = 0
+            self.addr.set(NULL)
             self.ctl_velocity_update_done.set(True)
             return
 
-        self.oaddr.set(self._oaddr)
-        self._oaddr += 1
+        self.addr.set(self._oaddr)
+        self._addr += 1
 
 class VelocityUpdater(Logic):
     def __init__(self):
@@ -51,7 +52,7 @@ class VelocityUpdater(Logic):
         self.a = [Input(self, f"a{i}") for i in range(N_CELL)]
         self.vi = [Input(self, f"vi{i}") for i in range(N_CELL)]
         self.vo = [Output(self, f"vo{i}") for i in range(N_CELL)]
-
+        
         self.updater_done = Output(self,"writer-done")
 
     def logic(self):
@@ -63,19 +64,30 @@ class VelocityUpdater(Logic):
             if _a is NULL:
                 vo.set(NULL)
             else:
-                vo.set([vn+an*DT for vn, an in zip(_v, _a)])
+                vo.set(_vi + DT * _a)
                 _updater_done = False
         self.updater_done.set(_updater_done)
 
+class ZeroConst(Logic):
+    def __init__(self):
+        super().__init__("acceleration-resettter")
+
+        self.o = Output(self,"o")
+    
+    def logic(self):
+        self.o.set(
+            numpy.array([0.0, 0.0, 0.0])
+        )
 
 velocity_update_controller = m.add(VelocityUpdateController())
 velocity_updater = m.add(VelocityUpdater())
+zero_const = m.add(ZeroConst())
 
 # is True when updater read NULL from every cache last cycle
 updater_done = m.add(Register("velocity-updater-done"))
 
 # velocity_update_controller inputs
-CTL_VELOCITY_UPDATE_READY = velocity_update_controller.ctl_velocity_update_ready
+CTL_READY = velocity_update_controller.ctl_velocity_update_ready
 connect(updater_done.o, velocity_update_controller.updater_done)
 
 # velocity_updater inputs
@@ -88,15 +100,17 @@ connect(velocity_updater.updater_done, updater_done.i)
 
 # a_muxes input
 for i in range(N_CELL):
-    connect(velocity_update_controller.oaddr, a_omuxes[i].oaddr_p2)
-    connect(null_const.o, a_imuxes[i].iaddr_p2)
-    connect(null_const.o, a_imuxes[i].i_p2)
+    connect(velocity_update_controller.addr, a_omuxes[i].oaddr_phase2)
+    connect(velocity_update_controller.addr, a_imuxes[i].iaddr_phase2)
+    # reset each acceleration as we read it so phase 1 doesn't have to
+    # worry about stale contents when it writes
+    connect(zero_const.o, a_imuxes[i].i_phase2)
 
 # v_muxes input
 for i in range(N_CELL):
-    connect(velocity_update_controller.oaddr, v_omuxes[i].oaddr_p2)
-    connect(velocity_update_controller.oaddr, v_imuxes[i].iaddr_p2)
-    connect(velocity_updater.vo[i], v_imuxes[i].i_p2)
+    connect(velocity_update_controller.addr, v_omuxes[i].oaddr_phase2)
+    connect(velocity_update_controller.addr, v_imuxes[i].iaddr_phase2)
+    connect(velocity_updater.vo[i], v_imuxes[i].i_phase2)
 
 # control_unit inputs
-CTL_VELOCITY_UPDATE_DONE = velocity_updater.updater_done
+CTL_DONE = velocity_updater.updater_done

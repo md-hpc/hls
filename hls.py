@@ -3,6 +3,7 @@ from collections import deque
 import re
 
 NULL = "NULL"
+RESET = "RESET"
 
 empty_ident = re.compile(".*/empty")
 
@@ -133,6 +134,7 @@ class BRAM:
         i = self.i()
         iaddr = self.iaddr()
         if i is not NULL and addr is not NULL:
+            if i is RESET:
             self.contents[iaddr] = i
 
     def __call__(self):
@@ -184,6 +186,7 @@ class Logic(ABC):
         self._pipeline = deque([]) 
         self.name = name
         self.verbose = False
+        self.debug = False
         self.empty = Output(self,"empty")
         self._n = 0 # number of inputs in pipeline
 
@@ -205,6 +208,8 @@ class Logic(ABC):
             return
         self._called = True
         debug(di() + f"Evaluating {self.name}")
+        if self.debug:
+            breakpoint()
         self.logic()
         self.empty.set(NULL)
 
@@ -268,6 +273,7 @@ class MockFPGA:
     def __init__(self):
         self.units = []
         self.validated = False
+        self._clock_validation_fn = None
 
     def add(self, obj):
         t = type(obj)
@@ -287,6 +293,7 @@ class MockFPGA:
 
         for unit in self.units:
             unit()
+            self._clock_validation_fn(unit)
 
         for unit in self.units:
             if type(unit) is BRAM or type(unit) is Register:

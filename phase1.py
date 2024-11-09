@@ -1,6 +1,7 @@
 import sys
 from hls import *
 from structures import *
+from numpy.linalg import norm
 
 # PHASE 1: position cache read/filter write AND filter read/force evaluator write
 
@@ -19,8 +20,8 @@ from structures import *
 CTL_DOUBLE_BUFFER = Input 
 
 # Force evaluation control
-CTL_FORCE_EVALUATION_READY = Input # reads as 1 when force evaluation should begin/continue, otherwise 0
-CTL_FORCE_EVALUATION_DONE = Output # write 1 when your units are done evaluating forces, otherwise write 0
+CTL_READY = Input # reads as 1 when force evaluation should begin/continue, otherwise 0
+CTL_DONE = Output # write 1 when your units are done evaluating forces, otherwise write 0
 
 
 class PositionReadController(Logic):
@@ -47,7 +48,6 @@ class PositionReadController(Logic):
         self._new_reference = False
         self.new_reference = Output(self, "new-reference") # if PositionReader should write a new value to the reference register
 
-        self.verbose = True
     def halt(self):
         self._next_timestep = True
         self.done.set(True)
@@ -121,8 +121,6 @@ class PositionReader(Logic):
         self.new_reference = Input(self, "new-reference")
         self.stale_reference = Output(self, "stale-reference")
 
-        self.verbose = True
-        self.verbose = True
 
     def logic(self):
         cell_r = self.cell_r.get()
@@ -189,19 +187,17 @@ class ParticleFilter(Logic):
         self.pipeline(FILTER_PIPELINE_STAGES)
 
     def logic(self):
-        r = self.reference.get()
-        n = self.neighbor.get()
+        reference = self.reference.get()
+        neighbor = self.neighbor.get()
 
-        if r is NULL or n is NULL:
+        if reference is NULL or neighbor is NULL or reference == neighbor:
             self.pair.set(NULL)
             return
 
-        r = math.sqrt(sum([
-            (r1 - r2)**2 for r1, r2 in zip(r.r, n.r)
-        ]))
+        r = norm(reference.r - neighbor.r)
 
         self.pair.set(
-                (r, n) if r < CUTOFF else NULL
+                [reference, neighbor] if r < CUTOFF else NULL
         )
 
 class ForcePipeline(Logic):
@@ -222,17 +218,17 @@ class ForcePipeline(Logic):
             self.neighbor.set(NULL)
             return
 
-        ref, neighbor = self.i.get()
-        l2 = lambda v1, v2: math.sqrt(sum([(r1-r2)**2 for r1, r2 in zip(v1, v2)]))
-        r = l2(ref.r, neighbor.r)
-        f = 4*EPSILON*((SIGMA/r)**12-(SIGMA/r)**6)*(ref.r - neighbor.r)/r
+        reference, neighbor = i
+        
+        r = norm(reference.r - neighbor.r)
+        f = 4.0*EPSILON*((SIGMA/r)**12.0-(SIGMA/r)**6.0)*(reference.r - neighbor.r)/r
         
         self.reference.set(
-            Acceleration(cell = ref_cell, addr = ref_addr, a = f)
+            Acceleration(cell = reference.cell, addr = reference.addr, a = f)
         )
 
         self.neighbor.set(
-            Acceleration(cell = neighbor_cell, addr = neighbor_addr, a = -1.0*f)
+            Acceleration(cell = neighbor.cell, addr = neighbor.addr, a = -1*f)
         )
 
 class AccelerationUpdateController(Logic):
@@ -253,16 +249,16 @@ class AccelerationUpdateController(Logic):
         neighbor = self.neighbor.get()
 
         if self._reference is not None and self.almost_done:
-            self._queue.append(self._r)
+            self._queue.append(self._reference)
             self._reference = None
         if reference is not NULL:    
-            if reference.addr != self._reference.addr or reference.cell != self._reference.cell:
-                self._queue.append(self._r)
+            if self._reference is None:
                 self._reference = reference
-            elif self._reference is None:
+            elif reference.addr != self._reference.addr or reference.cell != self._reference.cell:
+                self._queue.append(self._reference)
                 self._reference = reference
             else:
-                self._reference.a = [a1+a2 for a1, a2 in zip(self._reference.a, reference.a)]
+                self._reference.a += reference.a
 
         self.qempty.set(len(self._queue) == 0)
 
@@ -290,8 +286,9 @@ class AccelerationUpdater(Logic):
                 o.set(NULL)
             return
 
-        a = [a1+a2 for a1, a2 in zip(fragment.a, self.ai[fragment.cell].get())]
-        for idx, o in self.ao:
+        ai = self.ai[fragment.cell].get()
+
+        for idx, o in enumerate(self.ao):
             if idx == fragment.cell:
                 o.set(a)
             else:
@@ -339,7 +336,7 @@ reference = m.add(Register("reference"))
 # position_read_controller inputs
 connect(stale_reference.o, position_read_controller.stale_reference)
 CTL_DOUBLE_BUFFER = position_read_controller.ctl_double_buffer
-CTL_FORCE_EVALUATION_READY = position_read_controller.ctl_force_evaluation_ready
+CTL_READY = position_read_controller.ctl_force_evaluation_ready
 
 # position_reader inputs
 for p_cache, i in zip(p_caches, position_reader.i):
@@ -358,7 +355,7 @@ for o, f in zip(position_reader.o, filter_bank):
 for f, i in zip(filter_bank, filters_empty.i):
     connect(f.empty, i)
 
-# pair_queue inputs
+# pai_queue inputs
 for f, i in zip(filter_bank, pair_queue.i):
     connect(f.pair, i)
 
@@ -393,16 +390,16 @@ connect(position_reader.reference, reference.i)
 
 # p_muxes inputs
 for imux, omux in zip(p_imuxes, p_omuxes):
-    connect(position_read_controller.oaddr, omux.oaddr_p1)
-    connect(null_const.o, imux.iaddr_p1)
-    connect(null_const.o, imux.i_p1)
+    connect(position_read_controller.oaddr, omux.oaddr_phase1)
+    connect(null_const.o, imux.iaddr_phase1)
+    connect(null_const.o, imux.i_phase1)
 
 # a_muxes inputs
 for i in range(N_CELL):
     imux, omux = a_imuxes[i], a_omuxes[i]
-    connect(acceleration_update_controller.oaddr, omux.oaddr_p1)
-    connect(acceleration_update_controller.oaddr, imux.iaddr_p1)
-    connect(acceleration_updater.ao[i], imux.i_p1)
+    connect(acceleration_update_controller.oaddr, omux.oaddr_phase1)
+    connect(acceleration_update_controller.oaddr, imux.iaddr_phase1)
+    connect(acceleration_updater.ao[i], imux.i_phase1)
 
 # ==== CONTROL ====
-CTL_FORCE_EVALUATION_DONE = phase1_signaler.o
+CTL_DONE = phase1_signaler.o
