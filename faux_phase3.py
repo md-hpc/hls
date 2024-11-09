@@ -14,7 +14,8 @@ class FauxPositionUpdater(Logic):
         self.ctl_position_update_ready = Input(self,"position-update-ready")
         self.ctl_position_update_done = Output(self,"position-update-done")
         
-        self.caches = p_caches.copy() + v_caches.copy()
+        self.p_caches = p_caches
+        self.v_caches = v_caches
 
     def logic(self):
         double_buffer = self.ctl_double_buffer.get()
@@ -24,13 +25,32 @@ class FauxPositionUpdater(Logic):
             self.ctl_position_update_done.set(NULL)
             return
 
-        for cache in self.caches:
+        roffset = 256 if double_buffer else 0
+        woffset = (roffset+256)%512
+        waddrs = [woffset for _ in self.p_caches] # next free address
 
-            new_contents = cache.contents.copy()
-            for i, x in enumerate(cache.contents):
-                new_contents[(i+256)%512] = cache.contents[i]
-            cache.contents = new_contents
-        self.ctl_position_update_done.set(True)
+        for cell in range(N_CELL):
+            for waddr in range(woffset, woffset+256):
+                self.p_caches[cell].contents[waddr] = NULL
+                self.v_caches[cell].contents[waddr] = NULL
+        
+        for cell in range(N_CELL):
+            for raddr in range(roffset, roffset + 256):
+                v = self.v_caches[cell].contents[raddr]
+                r = self.p_caches[cell].contents[raddr]
+                
+                if r is NULL:
+                    continue
+
+                r = (r + v*DT) % L
+                
+                new_cell = cell_from_position(r)
+                waddr = waddrs[new_cell]
+                self.p_caches[new_cell].contents[waddr] = r
+                self.v_caches[new_cell].contents[waddr] = v
+                waddrs[new_cell] += 1
+
+        self.ctl_position_update_done.set(True)        
 
 
 faux_position_updater = m.add(FauxPositionUpdater(p_caches, v_caches))

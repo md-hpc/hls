@@ -20,11 +20,12 @@ class VelocityUpdateController(Logic):
 
         self.ctl_velocity_update_ready = Input(self,"velocity-update-ready")
         self.ctl_velocity_update_done = Output(self,"velocity-update-done")
-
+        
+        self._next_timestep = True
         self.updater_done = Input(self, "writer-done")
 
         self._addr = 0
-        self.addr = Output(self, "oaddr")
+        self.addr = Output(self, "addr")
 
     def logic(self):
         ctl_velocity_update_ready = self.ctl_velocity_update_ready.get()
@@ -36,14 +37,19 @@ class VelocityUpdateController(Logic):
 
         updater_done = self.updater_done.get()
 
-        if updater_done:
+        if updater_done and not self._next_timestep:
             self._addr = 0
             self.addr.set(NULL)
             self.ctl_velocity_update_done.set(True)
+            self._next_timestep = True
             return
-
-        self.addr.set(self._oaddr)
+ 
+        print(f"phase2: {self._addr}")
+       
+        self._next_timestep = False
+        self.addr.set(self._addr)
         self._addr += 1
+        self.ctl_velocity_update_done.set(False)
 
 class VelocityUpdater(Logic):
     def __init__(self):
@@ -60,28 +66,18 @@ class VelocityUpdater(Logic):
         for a, vi, vo in zip(self.a, self.vi, self.vo):
             _a = a.get()
             _vi = vi.get()
-            
+        
             if _a is NULL:
                 vo.set(NULL)
             else:
+                if _vi is NULL:
+                    _vi = numpy.array([0.0, 0.0, 0.0])
                 vo.set(_vi + DT * _a)
                 _updater_done = False
         self.updater_done.set(_updater_done)
 
-class ZeroConst(Logic):
-    def __init__(self):
-        super().__init__("acceleration-resettter")
-
-        self.o = Output(self,"o")
-    
-    def logic(self):
-        self.o.set(
-            numpy.array([0.0, 0.0, 0.0])
-        )
-
 velocity_update_controller = m.add(VelocityUpdateController())
 velocity_updater = m.add(VelocityUpdater())
-zero_const = m.add(ZeroConst())
 
 # is True when updater read NULL from every cache last cycle
 updater_done = m.add(Register("velocity-updater-done"))
@@ -101,10 +97,10 @@ connect(velocity_updater.updater_done, updater_done.i)
 # a_muxes input
 for i in range(N_CELL):
     connect(velocity_update_controller.addr, a_omuxes[i].oaddr_phase2)
-    connect(velocity_update_controller.addr, a_imuxes[i].iaddr_phase2)
     # reset each acceleration as we read it so phase 1 doesn't have to
     # worry about stale contents when it writes
-    connect(zero_const.o, a_imuxes[i].i_phase2)
+    connect(velocity_update_controller.addr, a_imuxes[i].iaddr_phase2)
+    connect(reset_const.o, a_imuxes[i].i_phase2)
 
 # v_muxes input
 for i in range(N_CELL):

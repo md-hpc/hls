@@ -5,6 +5,7 @@ from random import random
 from math import floor
 import hls
 import numpy
+import os
 
 hls.CONFIG_VERBOSE = False
 
@@ -106,38 +107,30 @@ for mux in concat(v_imuxes, v_omuxes):
     connect(control_unit.phase3_ready, mux.phase3_ready)
 
 # simulation initialization
-T = 5 # number of timesteps
-
-L = CUTOFF * UNIVERSE_SIZE # length of one dimension of the simulation box
-N = 80 * N_CELL # number of particles in the simulation
-
 cidx = [0 for _ in range(N_CELL)] # index into contents of each p_cache
-for _ in range(N):
+for _ in range(N_PARTICLE):
         r = numpy.array([L*random(), L*random(), L*random()])
-        idx = linear_idx( # find which p_cache this particle must go into
-            *[floor(x/CUTOFF) for x in r]
-        )
+        idx = cell_from_position(r)
         p_caches[idx].contents[cidx[idx]] = r
         cidx[idx] += 1
 
-for cache in v_caches:
-    cache.contents = [
-        numpy.array([0.0, 0.0, 0.0])
-        for _ in cache.contents
-    ]
-
-bram = p_caches[0]
-def validate_bram(unit):
-    assert bram.contents[0] is not NULL, unit.name
-m._clock_validation_fn = validate_bram
-
-phase1.force_pipeline.verbose = True
-phase1.pair_queue.verbose = True
+def save_pos(t):
+    if not os.path.exists("records"):
+        os.mkdir("records")
+    with open(f"records/t{t}","wb") as fp:
+        for cache in p_caches:
+            for p in cache.contents:
+                if p is not NULL:
+                    assert fp.write(p.tobytes()) == 24, "uh oh"
 
 t = 0
-while control_unit.t < 3:
-    print("==== NEXT CYCLE ====")
-    t += 1
-    if t == 10:
-        breakpoint()
-    m.clock()
+t0 = control_unit.t
+with numpy.errstate(all="raise"):
+    while control_unit.t < T:
+        if control_unit.t != t0:
+            save_pos(control_unit.t)
+            t0 = control_unit.t
+        print(f"==== CYCLE {control_unit.t}-{t}: {control_unit.phase} ====")
+        t += 1
+        m.clock()
+save_pos(control_unit.t)

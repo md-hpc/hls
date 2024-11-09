@@ -1,6 +1,7 @@
 from hls import *
 import random
 from collections import deque
+from math import floor
 
 '''
 constants, structures, and variables to be used by the phase{1,2,3}.py files
@@ -23,44 +24,17 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 m = MockFPGA()
 
 # Emulator constants
-UNIVERSE_SIZE = 4 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
+T = 5 # number of timesteps to simulate
+UNIVERSE_SIZE = 3 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
+EPSILON = 0.1 # LJ const
+SIGMA = 0.8 # LJ const
+DT = 0.1 # timestep length
+DENSITY = 10 # particles per cell
 
-EPSILON = 1.0 # LJ const
-SIGMA = 1.0 # LJ const
 
 # depth of computation pipelines. Your emulator should be robust to any value of these
 FORCE_PIPELINE_STAGES = 0
 FILTER_PIPELINE_STAGES = 0  
-
-# derrived from above
-N_CELL = UNIVERSE_SIZE ** 3
-CUTOFF = SIGMA * 2.5
-N_FILTER = 0
-for di in range(-1,2):
-    for dj in range(-1,2):
-        for dk in range(-1,2):
-            if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
-                continue
-            N_FILTER += 1
-
-# structs to hold particle data while it's passing through pipelines
-class Struct:
-    def __init__(self, data, addr, cell, ident):
-        self.cell = cell
-        self.addr = addr
-        self.ident = ident
-        setattr(self, ident, data)
-
-    def __eq__(self, obj):
-        return self.ident == obj.ident and self.cell == obj.cell and self.addr == obj.addr
-    
-    def __str__(self):
-        return f"({self.cell}, {self.addr}), {getattr(self,self.ident)}"
-
-Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
-Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
-Acceleration = lambda a, addr, cell: Struct(a, addr, cell, "a")
-
 
 # converts (i,j,k) tuple to linear idx and back
 def linear_idx(i,j,k):
@@ -80,6 +54,34 @@ class neighborhood:
                     if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
                         continue
                     yield linear_idx(i+di, j+dj, k+dk)
+
+# derrived from above
+N_CELL = UNIVERSE_SIZE ** 3
+CUTOFF = SIGMA * 2.5
+N_FILTER = sum([1 for _ in neighborhood(0)])
+N_PARTICLE = N_CELL * DENSITY
+L = CUTOFF * UNIVERSE_SIZE
+
+
+# structs to hold particle data while it's passing through pipelines
+class Struct:
+    def __init__(self, data, addr, cell, ident):
+        self.cell = cell
+        self.addr = addr
+        self.ident = ident
+        setattr(self, ident, data)
+
+    def __eq__(self, obj):
+        return self.ident == obj.ident and self.cell == obj.cell and self.addr == obj.addr
+    
+    def __str__(self):
+        return f"({self.cell}, {self.addr}), {getattr(self,self.ident)}"
+
+Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
+Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
+Acceleration = lambda a, addr, cell: Struct(a, addr, cell, "a")
+
+cell_from_position = lambda r: linear_idx(*[floor(x/CUTOFF)%UNIVERSE_SIZE for x in r])
 
 # if you're confused about what this does, ask me (Vance)
 class CacheMux(Logic):
@@ -127,6 +129,14 @@ class NullConst(Logic):
     def logic(self):
         self.o.set(NULL)
 
+class ResetConst(Logic):
+    def __init__(self):
+        super().__init__("reset-const")
+        self.o = Output(self,"o")
+
+    def logic(self):
+        self.o.set(RESET)
+
 class And(Logic):
     def __init__(self,n,name):
         super().__init__(name)
@@ -164,3 +174,4 @@ v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase2","phase3"])
 
 # reference these in the phase{1,2,3} files
 null_const = m.add(NullConst())
+reset_const = m.add(ResetConst())

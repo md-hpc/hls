@@ -85,9 +85,11 @@ class Register:
         self.o = Output(self, f"o")
 
     def write(self):
-        x = self.i()
-        if x is not NULL:
-            self.contents = self.i()
+        i = self.i()
+        if i is not NULL:
+            if i is RESET:
+                i = NULL
+            self.contents = i
 
     def __call__(self):
         if self._called:
@@ -129,12 +131,15 @@ class BRAM:
 
         self.o = Output(self, f"o")
         self.oaddr = Input(self, f"oaddr")
+        
+        self.verbose = False
 
     def write(self):
         i = self.i()
         iaddr = self.iaddr()
-        if i is not NULL and addr is not NULL:
+        if i is not NULL and iaddr is not NULL:
             if i is RESET:
+                i = NULL
             self.contents[iaddr] = i
 
     def __call__(self):
@@ -146,6 +151,14 @@ class BRAM:
             self.o.set(self.contents[oaddr])
         else:
             self.o.set(NULL)
+
+        if self.verbose:
+            print(f"{self.name}:")
+            print("\tINPUTS")
+            print(f"\t\toaddr: {self.oaddr.val}")
+            print("\tOUTPUTS")
+            print(f"\t\to: {self.o.val}")
+
 
     def identifiers(self):
         return [self.name, self.i.name, self.iaddr.name, self.o.name, self.oaddr.name]
@@ -219,7 +232,8 @@ class Logic(ABC):
                 print(f"{o.name} is None after calling parent logic")
                 passed = False
             if not passed:
-                raise Exception(f"Must set all Outputs to non-None in {self.name}.logic()")
+                print(f"ERROR: Must set all Outputs to non-None in {self.name}.logic()")
+                exit(1)
 
         self._pipeline.append(
                 [o.val for o in self._outputs]
@@ -230,7 +244,7 @@ class Logic(ABC):
 
         for o, val in zip(self._outputs, self._pipeline.popleft()):
             o.val = val
-        
+ 
         if any([o.val is not NULL for o in self._outputs]):
             self._n -= 1
  
@@ -273,7 +287,6 @@ class MockFPGA:
     def __init__(self):
         self.units = []
         self.validated = False
-        self._clock_validation_fn = None
 
     def add(self, obj):
         t = type(obj)
@@ -293,7 +306,6 @@ class MockFPGA:
 
         for unit in self.units:
             unit()
-            self._clock_validation_fn(unit)
 
         for unit in self.units:
             if type(unit) is BRAM or type(unit) is Register:

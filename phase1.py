@@ -2,7 +2,7 @@ import sys
 from hls import *
 from structures import *
 from numpy.linalg import norm
-
+import numpy
 # PHASE 1: position cache read/filter write AND filter read/force evaluator write
 
 # an important note for phase 1: we use periodic boundary conditions in this simulation, meaning that
@@ -63,12 +63,13 @@ class PositionReadController(Logic):
         
         if not ctl_force_evaluation_ready:
             self._next_timestep = True
+            self._cell_r = 0
             self.halt()
             return
 
         ctl_double_buffer = self.ctl_double_buffer.get()
         stale_reference = self.stale_reference.get()
-        offset = 256 if ctl_double_buffer else 0
+        addr_offset = 0 if not ctl_double_buffer else 256
 
         if self._next_timestep:
             stale_reference = True
@@ -82,20 +83,20 @@ class PositionReadController(Logic):
                     # Special case: stale_reference && self._new_reference && self._next_timestep
                     # means that we've begun the next timestep and need to start at (0,0)
                     self._next_timestep = False
-                    self._cell_r = 0
-                    self._addr_r = 0
+                    self._cell_r = 0 
+                    self._addr_r = addr_offset
                 else:
                     self._cell_r += 1
                     if self._cell_r == N_CELL:
                         # If we just incremented past the last cell, halt
                         self.halt()
                         return
-                    self._addr_r = 0
+                    self._addr_r = addr_offset
             else:
                 # We need the reader to load a new reference particle
                 self._addr_r += 1
             self._new_reference = True
-            self._addr_n = 0
+            self._addr_n = addr_offset
             addr = self._addr_r
         else:
             if self._new_reference:
@@ -103,7 +104,9 @@ class PositionReadController(Logic):
             else:
                 self._addr_n += 1
             addr = self._addr_n
-        print(self._cell_r, self._addr_r, self._addr_n)
+        
+        print("phase1:", self._cell_r, self._addr_r - addr_offset, self._addr_n)
+
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)
         self.oaddr.set(addr)
@@ -210,6 +213,7 @@ class ForcePipeline(Logic):
         self.neighbor = Output(self,"neigbor")
         
         self.pipeline(FORCE_PIPELINE_STAGES)
+        
 
     def logic(self):
         i = self.i.get()
@@ -221,8 +225,8 @@ class ForcePipeline(Logic):
         reference, neighbor = i
         
         r = norm(reference.r - neighbor.r)
-        f = 4.0*EPSILON*((SIGMA/r)**12.0-(SIGMA/r)**6.0)*(reference.r - neighbor.r)/r
-        
+        f = 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(reference.r - neighbor.r)/r
+
         self.reference.set(
             Acceleration(cell = reference.cell, addr = reference.addr, a = f)
         )
@@ -278,7 +282,7 @@ class AccelerationUpdater(Logic):
         self.fragment = Input(self,"i")
         self.ai = [Input(self,f"i{i}") for i in range(N_CELL)]
         self.ao = [Output(self,f"o{i}") for i in range(N_CELL)]
-    
+
     def logic(self):
         fragment = self.fragment.get()
         if fragment is NULL:
@@ -287,6 +291,10 @@ class AccelerationUpdater(Logic):
             return
 
         ai = self.ai[fragment.cell].get()
+        if ai is NULL:
+            a = fragment.a
+        else:
+            a = fragment.a + ai
 
         for idx, o in enumerate(self.ao):
             if idx == fragment.cell:
