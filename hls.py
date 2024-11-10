@@ -52,7 +52,6 @@ class Output:
         self.parent = parent
         self.name = f"{parent.name}/{name}"
         self.inputs = []
-
         if isinstance(self.parent, Logic):
             self.parent._outputs.append(self)
             self.parent._pipeline = deque([[NULL for _ in self.parent._outputs] for _ in self.parent._pipeline])
@@ -286,7 +285,8 @@ class Logic(ABC):
 class MockFPGA:
     def __init__(self):
         self.units = []
-        self.validated = False
+        self._init = False
+        self.verbose = False
 
     def add(self, obj):
         t = type(obj)
@@ -299,10 +299,14 @@ class MockFPGA:
     
                  
     def clock(self):
-        if not self.validated:
+        if not self._init:
             if not self.validate():
-                raise Exception("Validation of FPGA failed")
-            self.validated = True
+                print("Validation of FPGA failed")
+                exit(1)
+            
+            for u in self.units:
+                u.verbose = self.verbose
+            
 
         for unit in self.units:
             unit()

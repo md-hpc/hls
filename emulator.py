@@ -123,6 +123,7 @@ def save_pos(t):
                 if p is not NULL:
                     assert fp.write(p.tobytes()) == 24, "uh oh"
 
+
 t = 0
 t0 = control_unit.t
 with numpy.errstate(all="raise"):

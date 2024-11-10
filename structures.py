@@ -31,10 +31,18 @@ SIGMA = 0.8 # LJ const
 DT = 0.1 # timestep length
 DENSITY = 10 # particles per cell
 
-
 # depth of computation pipelines. Your emulator should be robust to any value of these
-FORCE_PIPELINE_STAGES = 0
-FILTER_PIPELINE_STAGES = 0  
+FORCE_PIPELINE_STAGES = 70
+FILTER_PIPELINE_STAGES = 13  
+# Number of compute pipelines working in parallel
+N_PIPELINE = 7
+
+# derrived from above
+N_CELL = UNIVERSE_SIZE ** 3
+CUTOFF = SIGMA * 2.5
+N_PARTICLE = N_CELL * DENSITY
+L = CUTOFF * UNIVERSE_SIZE
+N_FILTER = 14 # plz don't change
 
 # converts (i,j,k) tuple to linear idx and back
 def linear_idx(i,j,k):
@@ -54,13 +62,6 @@ class neighborhood:
                     if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
                         continue
                     yield linear_idx(i+di, j+dj, k+dk)
-
-# derrived from above
-N_CELL = UNIVERSE_SIZE ** 3
-CUTOFF = SIGMA * 2.5
-N_FILTER = sum([1 for _ in neighborhood(0)])
-N_PARTICLE = N_CELL * DENSITY
-L = CUTOFF * UNIVERSE_SIZE
 
 
 # structs to hold particle data while it's passing through pipelines
