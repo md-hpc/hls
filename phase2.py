@@ -11,7 +11,7 @@ import numpy
 # e.g. if you're accessing address 13 of a givne BRAM, and the bit is 0, you will just access address 13
 # but if bit is 1, you will access address 13 + 256 = 269 instead.
 
-CTL_READY = Input # read as 1 when velocity update should begin/continue, otherwise 0
+CTL_READY = [] # read as 1 when velocity update should begin/continue, otherwise 0
 CTL_DONE = Output # write 1 when your units are done evaluating velocity, otherwise write 0
 
 class VelocityUpdateController(Logic):
@@ -55,6 +55,8 @@ class VelocityUpdater(Logic):
     def __init__(self):
         super().__init__("velocity-updater")
         
+        self.ready = Input(self, "ready")
+
         self.a = [Input(self, f"a{i}") for i in range(N_CELL)]
         self.vi = [Input(self, f"vi{i}") for i in range(N_CELL)]
         self.vo = [Output(self, f"vo{i}") for i in range(N_CELL)]
@@ -62,6 +64,11 @@ class VelocityUpdater(Logic):
         self.updater_done = Output(self,"writer-done")
 
     def logic(self):
+        if not self.ready.get():
+            nul(self.vo)
+            self.updater_done.set(NULL)
+            return
+
         _updater_done = True
         for a, vi, vo in zip(self.a, self.vi, self.vo):
             _a = a.get()
@@ -70,8 +77,6 @@ class VelocityUpdater(Logic):
             if _a is NULL:
                 vo.set(NULL)
             else:
-                if _vi is NULL:
-                    _vi = numpy.array([0.0, 0.0, 0.0])
                 vo.set(_vi + DT * _a)
                 _updater_done = False
         self.updater_done.set(_updater_done)
@@ -83,10 +88,11 @@ velocity_updater = m.add(VelocityUpdater())
 updater_done = m.add(Register("velocity-updater-done"))
 
 # velocity_update_controller inputs
-CTL_READY = velocity_update_controller.ctl_velocity_update_ready
+CTL_READY.append(velocity_update_controller.ctl_velocity_update_ready)
 connect(updater_done.o, velocity_update_controller.updater_done)
 
 # velocity_updater inputs
+CTL_READY.append(velocity_updater.ready)
 for i in range(N_CELL):
     connect(a_caches[i].o, velocity_updater.a[i])
     connect(v_caches[i].o, velocity_updater.vi[i])

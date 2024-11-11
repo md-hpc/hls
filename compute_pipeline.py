@@ -4,19 +4,14 @@ from numpy.linalg import norm
 
 VERBOSE = False
 
-def bram_enum(cache, double_buffer):
-    a0 = 0 if not double_buffer else DBSIZE
-    a1 = a0 + DBSIZE
-    for addr, val in enumerate(cache.contents[a0:a1]):
-        yield addr + a0, val
-
 def next_timestep(p_caches, pipeline_inputs, filter_inputs, double_buffer): 
     pipeline_inputs.clear()
 
     for pi in filter_inputs:
         r, n = pi_to_p(pi)
-        print(f"filter expected ({r}) ({n})")
+        print(f"expected {r} {n}")
     if len(filter_inputs):
+        print(f"Filter banks from last timestep did not recieve all expected inputs")
         exit()
 
 
@@ -24,15 +19,13 @@ def next_timestep(p_caches, pipeline_inputs, filter_inputs, double_buffer):
          for cell_n in neighborhood(cell_r):
             if not n3l(cell_r, cell_n):
                 continue
-            if cell_r == 0 and cell_n == 9:
-                breakpoint()
             r_cache = p_caches[cell_r]
             n_cache = p_caches[cell_n]
-            for addr_r, r in bram_enum(r_cache, double_buffer):
+            for addr_r, r in bram_enum(r_cache.contents, double_buffer):
                 if r is NULL:
                     continue
-                for addr_n, n in bram_enum(n_cache, double_buffer):
-                    if n is NULL or not n3l_np(r,n):
+                for addr_n, n in bram_enum(n_cache.contents, double_buffer):
+                    if n is NULL:
                         continue
                     reference = Position(cell = cell_r, addr = addr_r, r = r)
                     neighbor = Position(cell = cell_n, addr = addr_n, r = n)
@@ -59,20 +52,21 @@ class ParticleFilter(Logic):
         reference = self.reference.get()
         neighbor = self.neighbor.get()
         
-        if reference is NULL or neighbor is NULL or reference == neighbor:
+        if reference is NULL or neighbor is NULL:
             self.o.set(NULL)
             return
        
         if VERBOSE:
             print(reference.origin(), neighbor.origin())
         pi = pair_ident(reference, neighbor)
-        if pi not in filter_inputs:
-            print(filter_inputs)
-            print("unexpected")
+        if pi not in self.input_set:
+            print(f"Filter bank recieved particle from unexpected origin {pi_to_p(pi)}")
             exit()
-        filter_inputs.add(pi)
+        self.input_set.remove(pi)
 
-
+        if reference == neighbor:
+            self.o.set(NULL)
+            return
 
         if not n3l(reference.r, neighbor.r):
             self.o.set(NULL)
@@ -127,9 +121,8 @@ class ForcePipeline(Logic):
             print(f"duplicate: {reference}, {neighbor}")
             exit(1)
         self.input_set.add(pi)
-    
-        r = norm(reference.r - neighbor.r)
-        f = 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(reference.r - neighbor.r)/r
+
+        f = lj(reference.r, neighbor.r)
 
         self.o.set([
             Acceleration(cell = reference.cell, addr = reference.addr, a = f),

@@ -107,7 +107,7 @@ class PositionReadController(Logic):
                 self._addr_n += 1
             addr = self._addr_n
         
-        print("phase1:", self._cell_r, self._addr_r - addr_offset, self._addr_n)
+        print(f"phase1: cell_r=={self._cell_r} addr=={self._addr_r}")
 
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)

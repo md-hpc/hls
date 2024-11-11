@@ -52,7 +52,6 @@ class PositionReadController(Logic):
         self.new_reference = Output(self, "new-reference") # if PositionReader should write a new value to the reference register
         
     def halt(self):
-        self._next_timestep = True
         self.done.set(True)
         self.oaddr.set(NULL)
         self.cell_r.set(NULL)
@@ -69,17 +68,18 @@ class PositionReadController(Logic):
             # we only reset ourselves once the control unit has acknowledged that we're done
             self._next_timestep = True
             self._cell_r = 0
+            self._addr_r = 0
             self.halt()
             return
 
         ctl_double_buffer = self.ctl_double_buffer.get()
         stale_reference = self.stale_reference.get()
-        addr_offset = 0 if not ctl_double_buffer else 256
+        addr_offset = 0 if not ctl_double_buffer else DBSIZE
 
         if self._next_timestep:
             stale_reference = True
             self._new_reference = 0
-
+            self._addr_r = addr_offset
                         
         if self._new_reference is not NULL:
             # if we loaded a new reference last cycle
@@ -110,6 +110,7 @@ class PositionReadController(Logic):
                     # some references are not NULL, we can iterate over neighbors
                     self._new_reference = NULL
                     self._stale_reference = False
+                    self._addr_n = addr_offset
                     addr = self._addr_n
             else:
                 addr = self._addr_r + self._new_reference

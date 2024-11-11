@@ -3,6 +3,7 @@ import random
 from collections import deque
 from math import floor
 import numpy
+from numpy.linalg import norm
 
 '''
 constants, structures, and variables to be used by the phase{1,2,3}.py files
@@ -52,6 +53,7 @@ L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
 
 
+# mod min, used to "center" our universe at our reference for N3L comparisons
 def modm(n, m):
     if abs(n) < abs(n%m):
         return n
@@ -64,7 +66,7 @@ def n3l(reference,neighbor):
     if type(reference) is list:
         return _n3l([modm((n-r),UNIVERSE_SIZE) for r,n in zip(reference, neighbor)])
     if type(reference) is numpy.ndarray:
-        return _n3l((modm(neighbor-reference,L)).tolist())
+        return _n3l([modm(r, L) for r in (neighbor-reference).tolist()])
     if type(reference) is int:
         return _n3l([modm(n-r,UNIVERSE_SIZE) for r,n in zip(cubic_idx(reference), cubic_idx(neighbor))])
     raise TypeError(f"Called n3l with unsupported {type(reference)}")
@@ -84,17 +86,14 @@ def linear_idx(i,j,k):
 def cubic_idx(i):
     return [i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE]
 
-class neighborhood:
-    def __init__(self, cell):
-        self.cell = cell
-    def __iter__(self):
-        i, j, k = cubic_idx(self.cell)
-        for di in range(-1,2):
-            for dj in range(-1,2):
-                for dk in range(-1,2):
-                    if not n3l([0,0,0],[di,dj,dk]):
-                        continue
-                    yield linear_idx(i+di, j+dj, k+dk)
+def neighborhood(cell, full=False):
+    i, j, k = cubic_idx(cell)
+    for di in range(-1,2):
+        for dj in range(-1,2):
+            for dk in range(-1,2):
+                if not n3l([0,0,0],[di,dj,dk]) and not full:
+                    continue
+                yield linear_idx(i+di, j+dj, k+dk)
 sz = sum([1 for _ in neighborhood(0)])
 assert sz == N_FILTER, f"Neighborhood size ({sz}) != N_FILTER ({N_FILTER})"
 
@@ -214,6 +213,17 @@ def concat(*iters):
     for it in iters:
         for x in it:
             yield x
+
+
+def lj(reference, neighbor):
+    r = norm(reference - neighbor)
+    return 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(neighbor - reference)/r
+
+def bram_enum(cache, double_buffer):
+    a0 = 0 if not double_buffer else DBSIZE
+    a1 = a0 + DBSIZE
+    for addr, val in enumerate(cache[a0:a1]):
+        yield addr + a0, val
 
 
 def init_bram(ident, mux_idents):
