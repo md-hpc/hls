@@ -38,12 +38,12 @@ class PositionController(Logic):
         self.current_velocity = [Input(self,"PS_current_velocity_"+str(i)) for i in range(N_CELL)]
         self.next_position = [Output(self,"PS_next_position_"+str(i)) for i in range(N_CELL)]
         self.next_velocity = [Output(self,"PS_next_velocity_"+str(i)) for i in range(N_CELL)]
-        self.nextAddr = Output(self,"PS_nextAddr_")
+        self.nextAddr = Output(self,"PS_nextAddr")
         self.update_address = [Output(self,"PS_update_address_"+str(i)) for i in range(N_CELL)]
         self.current_address = Input(self,"PS_current_address_")
 		
-        self.cidx = Input(self,"PS_cidx")
-		
+        self.cidx = [Input(self,"PS_cidx_"+str(i)) for i in range(N_CELL)]
+        self.cidx_o = [Output(self,"PS_cidx_o_"+str(i)) for i in range(N_CELL)]
         self.current_cell = Input(self,"PS_current_cell")
         self.next_cell = Output(self,"PS_next_cell")
 		
@@ -55,41 +55,86 @@ class PositionController(Logic):
     def logic(self):
 		
         if(self.ctl_force_position_update_ready.get()):
-			
-            if(hasCleared.get() == 0):
-                print("HELLO")
+            
+            
+            
+            if(self.hasCleared.get() == 0):
+                #print("HELLO")
+                self.ctl_position_update_done.set(0)
                 if(self.currentClear.get() == 255):
+                    
                     self.Cleared.set(1)
-                self.nextClear(self.currentClear.get()+1)
-                for i in range(N_CELL):                        
+                    self.nextClear.set(self.currentClear.get())
+                else:
+                    self.nextClear.set(self.currentClear.get()+1)
+                    self.Cleared.set(0)
+                #print((1 - self.ctl_double_buffer)  * 256 + self.currentClear.get())
+                for i in range(N_CELL): 
+                    
                     self.update_address[i].set((1 - self.ctl_double_buffer)  * 256 + self.currentClear.get())
-                    self.next_position[i].set(NULL)
-                    self.next_velocity[i].set(NULL)
+                    self.next_position[i].set(RESET)
+                    self.next_velocity[i].set(RESET)
+                self.nextAddr.set( (self.ctl_double_buffer) * 256 )
+                for i in range(N_CELL):
+                    self.cidx_o[i].set(0)
+                self.next_cell.set(0)
 
             else:
+                self.Cleared.set(1)
+                self.nextClear.set(self.currentClear.get())
                 r = self.current_position[self.current_cell.get()].get()
                 #if(r != NULL and v != NULL)
                 v = self.current_velocity[self.current_cell.get()].get()
+                #print("Something")
                 if(r == NULL or v == NULL or self.current_address.get() == 256):
+                    for i in range(N_CELL):
+                        self.next_velocity[i].set(self.current_velocity[i].get())
+                        self.next_position[i].set(self.current_position[i].get())
+                        self.cidx_o[i].set(self.cidx[i].get())
+                        self.update_address[i].set((1 - self.ctl_double_buffer)  * 256 + self.cidx[i].get())
                     if(self.current_address.get() == 256):
                         raise("There are 256 particles in this cell")
-                    if(current_cell.get() == N_CELL - 1):
+                    if(self.current_cell.get() == N_CELL - 1):
+                        #self.ctl_position_update_done.set(1)
+                        self.nextAddr.set( self.current_address.get())
+                        self.next_cell.set(self.current_cell.get())
                         self.ctl_position_update_done.set(1)
+                        #print("DONE")
                     else:
                         self.nextAddr.set(( self.ctl_double_buffer) * 256 )
                         self.next_cell.set(self.current_cell.get() + 1)
+                        self.ctl_position_update_done.set(0)
+                        #print("NEXT: " + str(self.current_cell.get()  + 1))
                 else:
+                    self.ctl_position_update_done.set(0)
+                    self.next_cell.set(self.current_cell.get())
                     self.nextAddr.set((self.current_address.get() + 1)%256 + (self.ctl_double_buffer) * 256 )
-                    r_o = r + v * dT
-
+                    r_o = list(r)
+                    r_o[0] += v[0] * dT
+                    r_o[1] += v[1] * dT
+                    r_o[2] += v[2] * dT
+                    #print(r)
+                    #print(r_o)
                     idx = linear_idx( # find which p_cache this particle must go into
-                        [floor(x/CUTOFF) for x in r]
+                        floor(r_o[0]/CUTOFF),floor(r_o[1]/CUTOFF),floor(r_o[2]/CUTOFF)
                     )
+                    #if(idx != self.current_cell.get()):
+                    #    print(str(idx)+ " -----> " + str(self.current_cell.get()))
+                    #else:
+                    #    print("NO TRANSITION")
                     self.update_address[idx].set((1 - self.ctl_double_buffer)  * 256 + self.cidx[idx].get())
                     
                     self.next_velocity[idx].set(v)
-                    self.next_position[idx].set(r_o)
-                    self.cidx[idx].set(self.cidx[idx].get() + 1)
+                    self.next_position[idx].set(tuple(r_o))
+                    self.cidx_o[idx].set(self.cidx[idx].get() + 1)
+                    #if(idx == 0):
+                    #    print(str(self.current_cell.get())+"  |  " +str(self.current_address.get() + 1)+ " ------> "+str(idx) + "  |  "+ str(self.cidx[idx].get()))
+                    for i in range(N_CELL):
+                        if(i != idx):
+                            self.next_velocity[i].set(self.current_velocity[i].get())
+                            self.next_position[i].set(self.current_position[i].get())
+                            self.cidx_o[i].set(self.cidx[i].get())
+                            self.update_address[i].set((1 - self.ctl_double_buffer)  * 256 + self.cidx[i].get())
 		
 readController = m.add(PositionController())
 CTL_FORCE_POSITION_UPDATE_READY = readController.ctl_force_position_update_ready
@@ -128,22 +173,27 @@ connect(memClear.o,readController.hasCleared)
 
 connect(clearCounter.o,readController.currentClear)
 connect(readController.nextClear,clearCounter.i)
-
+connect(current_cell.o,readController.current_cell)
+connect(readController.next_cell,current_cell.i)
 for i in range(len(p_caches)):
-	connect(ptrPos.o, p_caches[i].oaddr)
-	connect(ptrVel.o, v_caches[i].oaddr)
-	connect(p_caches[i].o,readController.current_position[i])
-	connect(v_caches[i].o,readController.current_velocity[i])
+    
+    connect(ptrPos.o, p_caches[i].oaddr)
+    connect(ptrVel.o, v_caches[i].oaddr)
+    connect(p_caches[i].o,readController.current_position[i])
+    connect(v_caches[i].o,readController.current_velocity[i])
 	
-	connect(readController.update_address[i], p_caches[i].iaddr)
-	connect(readController.next_position[i], p_caches[i].i)
-	connect(readController.update_address[i], v_caches[i].iaddr)
-	connect(readController.next_velocity[i], v_caches[i].i)
+    connect(readController.update_address[i], p_caches[i].iaddr)
+    connect(readController.next_position[i], p_caches[i].i)
+    connect(readController.update_address[i], v_caches[i].iaddr)
+    connect(readController.next_velocity[i], v_caches[i].i)
 
-
+    connect(cidx[i].o,readController.cidx[i])
+    connect(readController.cidx_o[i],cidx[i].i)
+    
 L = CUTOFF * UNIVERSE_SIZE # length of one dimension of the simulation box
 N = 80 * N_CELL # number of particles in the simulation
 
+'''
 init_cidx = [0 for _ in range(N_CELL)] # index into contents of each p_cache
 for _ in range(N):
     r = (L*random.random(), L*random.random(), L*random.random())
@@ -155,9 +205,12 @@ for _ in range(N):
     v_caches[idx].contents[init_cidx[idx]] = v
     init_cidx[idx] += 1
 
-
-for i in range(256):
+print(p_caches[0].contents)
+for i in range(5440):
 	m.clock()
+print(p_caches[0].contents)
+print(v_caches[0].contents)
+'''
 #print(p_caches[0].contents)
 #print(v_caches[0].contents)
 # we use double buffering (every other phase we use the top half of the caches instead because of

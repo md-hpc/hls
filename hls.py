@@ -3,7 +3,7 @@ from collections import deque
 import re
 
 NULL = "NULL"
-
+RESET = "RESET"
 empty_ident = re.compile(".*/empty")
 
 CONFIG_VERBOSE = False
@@ -129,7 +129,7 @@ class BRAM:
     def write(self):
         i = self.i()
         iaddr = self.iaddr()
-        if i is not NULL and addr is not NULL:
+        if i is not NULL and iaddr is not NULL:
             if i is RESET:
                 i = NULL
             self.contents[iaddr] = i
