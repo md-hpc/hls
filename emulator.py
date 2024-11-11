@@ -1,7 +1,7 @@
 from hls import *
 from structures import *
 import sys
-from random import random
+from random import random, seed
 from math import floor
 import hls
 import numpy
@@ -107,6 +107,7 @@ for mux in concat(v_imuxes, v_omuxes):
     connect(control_unit.phase3_ready, mux.phase3_ready)
 
 # simulation initialization
+seed(0)
 cidx = [0 for _ in range(N_CELL)] # index into contents of each p_cache
 for _ in range(N_PARTICLE):
         r = numpy.array([L*random(), L*random(), L*random()])
@@ -122,7 +123,6 @@ def save_pos(t):
             for p in cache.contents:
                 if p is not NULL:
                     assert fp.write(p.tobytes()) == 24, "uh oh"
-
 
 t = 0
 t0 = control_unit.t

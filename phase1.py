@@ -44,9 +44,10 @@ class PositionReadController(Logic):
         self.oaddr = Output(self, "oaddr")
         self.cell_r = Output(self, "cell-r")
 
-        self._new_reference = False
+        self._new_reference = NULL
+        self._stale_reference = True
         self.new_reference = Output(self, "new-reference") # if PositionReader should write a new value to the reference register
-
+        
     def halt(self):
         self._next_timestep = True
         self.done.set(True)
@@ -56,11 +57,13 @@ class PositionReadController(Logic):
         
     def logic(self):
         ready = self.ready.get() 
+
         if ready and self._cell_r >= N_CELL:
             self.halt()
             return
         
         if not ready:
+            # we only reset ourselves once the control unit has acknowledged that we're done
             self._next_timestep = True
             self._cell_r = 0
             self.halt()
@@ -72,39 +75,61 @@ class PositionReadController(Logic):
 
         if self._next_timestep:
             stale_reference = True
-            self._new_reference = True
+            self._new_reference = 0
 
-        if stale_reference:
-            if self._new_reference: 
-                # We read a new reference particle last cycle, but
-                # we still got NULL. Time for a new reference cell
-                if self._next_timestep:
-                    # Special case: stale_reference && self._new_reference && self._next_timestep
-                    # means that we've begun the next timestep and need to start at (0,0)
-                    self._next_timestep = False
-                    self._cell_r = 0 
-                    self._addr_r = addr_offset
-                else:
-                    self._cell_r += N_PIPELINE
-                    if self._cell_r >= N_CELL:
-                        # If we just incremented past the last cell, halt
+                        
+        if self._new_reference is not NULL:
+            # if we loaded a new reference last cycle
+            if self._next_timestep:
+                # this is the first cycle of a new timestep
+                self._next_timestep = False
+            else:
+                if stale_reference == False:
+                    self._stale_reference = False
+                self._new_reference += 1
+
+            if self._new_reference == N_PIPELINE:
+                # all references have been loaded
+                if self._stale_reference:
+                    # all references read were NULL, 
+                    self._cell_r += 1
+                    if self._cell_r == N_CELL:
+                        # we've iterated over all cells. Terminate timestep
                         self.halt()
                         return
+                    
+                    # go to next cell
+                    self._new_reference = 0
                     self._addr_r = addr_offset
+                    self._stale_reference = True
+                    addr = self._addr_r
+                else:
+                    # some references are not NULL, we can iterate over neighbors
+                    self._new_reference = NULL
+                    self._stale_reference = False
+                    addr = self._addr_n
             else:
-                # We need the reader to load a new reference particle
-                self._addr_r += 1
-            self._new_reference = True
+                addr = self._addr_r + self._new_reference
+
+        elif stale_reference:
+            # if we only read NULL neighbors last cycle
+            self._new_reference = 0
             self._addr_n = addr_offset
+            self._addr_r += N_PIPELINE
             addr = self._addr_r
+            self._stale_reference = True
         else:
-            if self._new_reference:
-                self._new_reference = False
-            else:
-                self._addr_n += 1
+            # we've still got neighbors to go
+            self._addr_n += 1
             addr = self._addr_n
+
+
+        if self._new_reference is NULL:
+            print(f"neighbor: {self._cell_r} {addr}")
+        else:
+            print(f"reference: {self._cell_r} {addr}")
         
-        print("phase1:", self._cell_r, self._addr_r - addr_offset, self._addr_n)
+        
 
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)
@@ -115,11 +140,8 @@ class PositionReader(Logic):
     def __init__(self):
         super().__init__("position-reader")
         self.i = [Input(self, f"i{i}") for i in range(N_CELL)]
-        self.o = [
-            [Output(self, f"o{j}-{i}") for i in range(N_FILTER)]
-            for j in range(N_PIPELINE)
-        ]
-
+        self.o = [Output(self, f"o{i}") for i in range(N_FILTER)]
+        
         self.references = [Output(self, f"reference-{i}") for i in range(N_PIPELINE)]
 
         self.cell_r = Input(self, "cell-r")
@@ -134,49 +156,37 @@ class PositionReader(Logic):
         addr = self.addr.get()
 
         if cell_r is NULL:
-            [[o.set(NULL) for o in outputs] for outputs in self.o]
+            [o.set(NULL) for o in self.o]
             [r.set(NULL) for r in self.references]
             self.stale_reference.set(NULL)
             return
 
-        if new_reference:
-            _stale_reference = True
-            for pidx, reference in enumerate(self.references):        
-                if cell_r + pidx >= N_CELL:
-                    reference.set(NULL)
-                    continue
-
-                r = self.i[cell_r + pidx].get()
-                if r is NULL:
-                    reference.set(r)
+        if new_reference is not NULL:
+            _reference = self.i[cell_r].get()
+            _stale_reference = _reference is NULL
+            if _stale_reference:
+                _reference = RESET
+            else:
+                _reference = Position(cell = cell_r, addr = addr, r=_reference)
+            for pidx, reference in enumerate(self.references):
+                if pidx == new_reference:
+                    reference.set(_reference)
                 else:
-                    p = Position(cell = cell_r + pidx, addr = addr, r = r)
-                    reference.set(p)
-                    _stale_reference = False
-
+                    reference.set(NULL)
             self.stale_reference.set(_stale_reference)
-            for outputs in self.o:
-                for o in outputs:
-                    o.set(NULL)
+            for o in self.o:
+                o.set(NULL)
             return
 
-        _stale_reference = True
-        
-        for pidx in range(N_PIPELINE):
-            if cell_r + pidx >= N_CELL:
-                for o in self.o[pidx]:
-                    o.set(NULL)
-                continue
-
-            for o, cidx in zip(self.o[pidx], neighborhood(cell_r + pidx)):
-                r = self.i[cidx].get()
-                if r is NULL:
-                    o.set(NULL)
-                else:
-                    _stale_reference = False
-                    p = Position(cell = cidx, addr = addr, r = r)
-                    o.set(p)
-
+        _stale_reference = True 
+        for cidx, o in zip(neighborhood(cell_r), self.o):
+            i = self.i[cidx].get()
+            if i is NULL:
+                o.set(NULL)
+            else:
+                _stale_reference = False
+                o.set(Position(cell=cidx, addr=addr, r=i))
+            
         for r in self.references:
             r.set(NULL)
         self.stale_reference.set(_stale_reference)
@@ -342,10 +352,6 @@ class AccelerationUpdater(Logic):
                 _ao = _fragment.a + _ai
             ao.set(_ao)
         
-
-position_read_controller = m.add(PositionReadController())
-position_reader = m.add(PositionReader())
-
 class ComputePipeline:
     def __init__(self,i, m):
         self._reference = m.add(Register(f"reference-{i}"))
@@ -392,6 +398,9 @@ class ComputePipeline:
         self.o = self.pipeline_reader.o
         self.done = self.pipeline_reader.done
 
+position_read_controller = m.add(PositionReadController())
+position_reader = m.add(PositionReader())
+
 compute_pipelines = [ComputePipeline(pidx,m) for pidx in range(N_PIPELINE)]
 
 acceleration_update_controller = m.add(AccelerationUpdateController())
@@ -423,7 +432,7 @@ connect(position_read_controller.oaddr, position_reader.addr)
 # ==== FORCE EVALUATION ====
 # compute_pipeline inputs
 for pidx in range(N_PIPELINE):
-    outputs = position_reader.o[pidx]
+    outputs = position_reader.o
     inputs = compute_pipelines[pidx].i
     for o, i in zip(outputs, inputs):
         connect(o,i)

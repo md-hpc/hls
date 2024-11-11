@@ -39,17 +39,20 @@ class FauxPositionUpdater(Logic):
                 v = self.v_caches[cell].contents[raddr]
                 r = self.p_caches[cell].contents[raddr]
                 
-                if r is NULL:
+
+                if r is NULL and v is NULL:
                     continue
 
-                r = (r + v*DT) % L
+                if r is NULL:
+                    print(cell, raddr)
+                else:
+                    r = (r + v*DT) % L
                 
                 new_cell = cell_from_position(r)
                 waddr = waddrs[new_cell]
                 self.p_caches[new_cell].contents[waddr] = r
                 self.v_caches[new_cell].contents[waddr] = v
                 waddrs[new_cell] += 1
-
         self.ctl_position_update_done.set(True)        
 
 

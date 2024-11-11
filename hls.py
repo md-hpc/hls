@@ -302,11 +302,7 @@ class MockFPGA:
         if not self._init:
             if not self.validate():
                 print("Validation of FPGA failed")
-                exit(1)
-            
-            for u in self.units:
-                u.verbose = self.verbose
-            
+                exit(1) 
 
         for unit in self.units:
             unit()
