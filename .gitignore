@@ -1,1 +1,5 @@
 **/__pycache__
+records
+*.gif
+*.swp
+test.py
