@@ -87,6 +87,7 @@ class Register:
         i = self.i()
         if i is not NULL:
             if i is RESET:
+                print(f"Resetting register {self.name}")
                 i = NULL
             self.contents = i
 

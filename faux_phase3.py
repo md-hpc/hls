@@ -18,6 +18,8 @@ class FauxPositionUpdater(Logic):
         self.v_caches = v_caches
 
     def logic(self):
+        passed = True
+
         double_buffer = self.ctl_double_buffer.get()
         ready = self.ctl_position_update_ready.get()
 
@@ -44,7 +46,12 @@ class FauxPositionUpdater(Logic):
                     continue
 
                 if r is NULL:
-                    print(cell, raddr)
+                    print(f"extra {cell}, {raddr}")
+                    passed = False
+                    continue
+                elif v is NULL:
+                    print(f"missing {cell}, {raddr}")
+                    passed = False
                 else:
                     r = (r + v*DT) % L
                 

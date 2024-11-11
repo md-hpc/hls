@@ -7,10 +7,19 @@ import hls
 import numpy
 import os
 
-hls.CONFIG_VERBOSE = False
+import compute_pipeline
+from verify import verify
 
-import phase1
+
+if "--naive" in sys.argv:
+    import naive as  phase1
+if "--particle-mapping" in sys.argv:
+    import particle_mapping as phase1
+if "--uniform-spread" in sys.argv:
+    import uniform_spread as phase1
+
 import phase2
+
 if "-t" in sys.argv:
     import faux_phase3 as phase3
 else:
@@ -107,7 +116,7 @@ for mux in concat(v_imuxes, v_omuxes):
     connect(control_unit.phase3_ready, mux.phase3_ready)
 
 # simulation initialization
-seed(0)
+seed(SEED)
 cidx = [0 for _ in range(N_CELL)] # index into contents of each p_cache
 for _ in range(N_PARTICLE):
         r = numpy.array([L*random(), L*random(), L*random()])
@@ -124,14 +133,31 @@ def save_pos(t):
                 if p is not NULL:
                     assert fp.write(p.tobytes()) == 24, "uh oh"
 
+
+compute_pipeline.VERBOSE = True
+
+filter_inputs = set()
+pipeline_inputs = set()
+
+for cp in phase1.compute_pipelines:
+    for f in cp.filters:
+        f.input_set = filter_inputs
+    cp.force_pipeline.input_set = pipeline_inputs
+
 t = 0
+cycles_total = 0
 t0 = control_unit.t
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
         if control_unit.t != t0:
             save_pos(control_unit.t)
             t0 = control_unit.t
+            compute_pipeline.next_timestep(control_unit.double_buffer)
+            cycles_total += t
+            t = 0
         print(f"==== CYCLE {control_unit.t}-{t}: {control_unit.phase} ====")
-        t += 1
         m.clock()
+        t += 1
+
 save_pos(control_unit.t)
+print(f"Emulator took {cycles_total} clock cycles to simulate {T} timesteps")

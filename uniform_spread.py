@@ -1,8 +1,11 @@
 import sys
-from hls import *
-from structures import *
 from numpy.linalg import norm
 import numpy
+
+from hls import *
+from structures import *
+from compute_pipeline import ComputePipeline
+
 # PHASE 1: position cache read/filter write AND filter read/force evaluator write
 
 # an important note for phase 1: we use periodic boundary conditions in this simulation, meaning that
@@ -44,10 +47,9 @@ class PositionReadController(Logic):
         self.oaddr = Output(self, "oaddr")
         self.cell_r = Output(self, "cell-r")
 
-        self._new_reference = NULL
-        self._stale_reference = True
+        self._new_reference = False
         self.new_reference = Output(self, "new-reference") # if PositionReader should write a new value to the reference register
-        
+
     def halt(self):
         self._next_timestep = True
         self.done.set(True)
@@ -57,13 +59,11 @@ class PositionReadController(Logic):
         
     def logic(self):
         ready = self.ready.get() 
-
         if ready and self._cell_r >= N_CELL:
             self.halt()
             return
         
         if not ready:
-            # we only reset ourselves once the control unit has acknowledged that we're done
             self._next_timestep = True
             self._cell_r = 0
             self.halt()
@@ -75,61 +75,39 @@ class PositionReadController(Logic):
 
         if self._next_timestep:
             stale_reference = True
-            self._new_reference = 0
+            self._new_reference = True
 
-                        
-        if self._new_reference is not NULL:
-            # if we loaded a new reference last cycle
-            if self._next_timestep:
-                # this is the first cycle of a new timestep
-                self._next_timestep = False
-            else:
-                if stale_reference == False:
-                    self._stale_reference = False
-                self._new_reference += 1
-
-            if self._new_reference == N_PIPELINE:
-                # all references have been loaded
-                if self._stale_reference:
-                    # all references read were NULL, 
-                    self._cell_r += 1
-                    if self._cell_r == N_CELL:
-                        # we've iterated over all cells. Terminate timestep
+        if stale_reference:
+            if self._new_reference: 
+                # We read a new reference particle last cycle, but
+                # we still got NULL. Time for a new reference cell
+                if self._next_timestep:
+                    # Special case: stale_reference && self._new_reference && self._next_timestep
+                    # means that we've begun the next timestep and need to start at (0,0)
+                    self._next_timestep = False
+                    self._cell_r = 0 
+                    self._addr_r = addr_offset
+                else:
+                    self._cell_r += N_PIPELINE
+                    if self._cell_r >= N_CELL:
+                        # If we just incremented past the last cell, halt
                         self.halt()
                         return
-                    
-                    # go to next cell
-                    self._new_reference = 0
                     self._addr_r = addr_offset
-                    self._stale_reference = True
-                    addr = self._addr_r
-                else:
-                    # some references are not NULL, we can iterate over neighbors
-                    self._new_reference = NULL
-                    self._stale_reference = False
-                    addr = self._addr_n
             else:
-                addr = self._addr_r + self._new_reference
-
-        elif stale_reference:
-            # if we only read NULL neighbors last cycle
-            self._new_reference = 0
+                # We need the reader to load a new reference particle
+                self._addr_r += 1
+            self._new_reference = True
             self._addr_n = addr_offset
-            self._addr_r += N_PIPELINE
             addr = self._addr_r
-            self._stale_reference = True
         else:
-            # we've still got neighbors to go
-            self._addr_n += 1
+            if self._new_reference:
+                self._new_reference = False
+            else:
+                self._addr_n += 1
             addr = self._addr_n
-
-
-        if self._new_reference is NULL:
-            print(f"neighbor: {self._cell_r} {addr}")
-        else:
-            print(f"reference: {self._cell_r} {addr}")
         
-        
+        print(f"phase1: cell_r=={self._cell_r} addr_r=={self._addr_r - addr_offset} addr_n=={self._addr_n}")
 
         self.new_reference.set(self._new_reference)
         self.cell_r.set(self._cell_r)
@@ -140,8 +118,11 @@ class PositionReader(Logic):
     def __init__(self):
         super().__init__("position-reader")
         self.i = [Input(self, f"i{i}") for i in range(N_CELL)]
-        self.o = [Output(self, f"o{i}") for i in range(N_FILTER)]
-        
+        self.o = [
+            [Output(self, f"o{j}-{i}") for i in range(N_FILTER)]
+            for j in range(N_PIPELINE)
+        ]
+
         self.references = [Output(self, f"reference-{i}") for i in range(N_PIPELINE)]
 
         self.cell_r = Input(self, "cell-r")
@@ -156,149 +137,52 @@ class PositionReader(Logic):
         addr = self.addr.get()
 
         if cell_r is NULL:
-            [o.set(NULL) for o in self.o]
+            [[o.set(NULL) for o in outputs] for outputs in self.o]
             [r.set(NULL) for r in self.references]
             self.stale_reference.set(NULL)
             return
 
-        if new_reference is not NULL:
-            _reference = self.i[cell_r].get()
-            _stale_reference = _reference is NULL
-            if _stale_reference:
-                _reference = RESET
-            else:
-                _reference = Position(cell = cell_r, addr = addr, r=_reference)
-            for pidx, reference in enumerate(self.references):
-                if pidx == new_reference:
-                    reference.set(_reference)
+        if new_reference:
+            _stale_reference = True
+            for pidx, reference in enumerate(self.references):        
+                if cell_r + pidx >= N_CELL:
+                    reference.set(RESET)
+                    continue
+
+                r = self.i[cell_r + pidx].get()
+                if r is NULL:
+                    reference.set(RESET)
                 else:
-                    reference.set(NULL)
+                    p = Position(cell = cell_r + pidx, addr = addr, r = r)
+                    reference.set(p)
+                    _stale_reference = False
+
             self.stale_reference.set(_stale_reference)
-            for o in self.o:
-                o.set(NULL)
+            for outputs in self.o:
+                for o in outputs:
+                    o.set(NULL)
             return
 
-        _stale_reference = True 
-        for cidx, o in zip(neighborhood(cell_r), self.o):
-            i = self.i[cidx].get()
-            if i is NULL:
-                o.set(NULL)
-            else:
-                _stale_reference = False
-                o.set(Position(cell=cidx, addr=addr, r=i))
-            
+        _stale_reference = True
+        
+        for pidx in range(N_PIPELINE):
+            if cell_r + pidx >= N_CELL:
+                for o in self.o[pidx]:
+                    o.set(NULL)
+                continue
+
+            for o, cidx in zip(self.o[pidx], neighborhood(cell_r + pidx)):
+                r = self.i[cidx].get()
+                if r is NULL:
+                    o.set(NULL)
+                else:
+                    _stale_reference = False
+                    p = Position(cell = cidx, addr = addr, r = r)
+                    o.set(p)
+
         for r in self.references:
             r.set(NULL)
         self.stale_reference.set(_stale_reference)
-
-class ParticleFilter(Logic):
-    def __init__(self,pidx,i):
-        super().__init__(f"particle-filter-{pidx}-{i}")
-
-        self.reference = Input(self,"reference")
-        self.neighbor = Input(self,"neighbor")
-
-        self.o = Output(self,"o")
-
-        self.pipeline(FILTER_PIPELINE_STAGES)
-
-    def logic(self):
-        reference = self.reference.get()
-        neighbor = self.neighbor.get()
-
-        if reference is NULL or neighbor is NULL or reference == neighbor:
-            self.o.set(NULL)
-            return
-
-        r = norm(reference.r - neighbor.r)
-        assert r != 0, f"{reference} {neighbor}"
-
-        self.o.set(
-                [reference, neighbor] if r < CUTOFF else NULL
-        )
-
-
-class PairQueue(Logic):
-    def __init__(self,i):
-        super().__init__(f"pair-queue-{i}")
-        self.i = [Input(self, f"i{i}") for i in range(N_FILTER)]
-        self.o = Output(self, "o")
-        self._queue = []
-        self.qempty = Output(self, "qempty")
-    
-    def logic(self):
-        for i in [i.get() for i in self.i]:
-            if i is not NULL:
-                self._queue.append(i)
-        self.qempty.set(len(self._queue) == 0)
-        if len(self._queue) != 0:
-            self.o.set(self._queue.pop(0))
-        else:
-            self.o.set(NULL)
-
-class ForcePipeline(Logic):
-    def __init__(self, i):
-        super().__init__(f"force-pipeline-{i}")
-        
-        self.i = Input(self,"i")
-        self.o = Output(self,"o")
-     
-        self.pipeline(FORCE_PIPELINE_STAGES)
-        
-    def logic(self):
-        i = self.i.get()
-        if i is NULL:
-            self.o.set(NULL)
-            return
-
-        reference, neighbor = i
-        
-        r = norm(reference.r - neighbor.r)
-        f = 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(reference.r - neighbor.r)/r
-
-        self.o.set([
-            Acceleration(cell = reference.cell, addr = reference.addr, a = f),
-            Acceleration(cell = neighbor.cell, addr = neighbor.addr, a = -1*f),
-        ])
-
-class PipelineReader(Logic):
-    def __init__(self,i):
-        super().__init__(f"pipeline-reader-{i}")
-        self.i = Input(self, "i")
-        self._reference = None
-        self._queue = []
-        self.o = Output(self, "o")
-
-        self.almost_done = Input(self, "almost-done")
-        self.done = Output(self, "done")
-
-    def logic(self):
-        i = self.i.get()
-
-        almost_done = self.almost_done.get()
-
-        if self._reference is not None and almost_done:
-            self._queue.append(self._reference)
-            self._reference = None
-        
-        if i is not NULL:
-            reference, neighbor = i
-            if self._reference is None:
-                self._reference = reference
-            elif reference.addr != self._reference.addr or reference.cell != self._reference.cell:
-                self._queue.append(self._reference)
-                self._reference = reference
-            else:
-                self._reference.a += reference.a
-            self._queue.append(neighbor)
-
-        self.done.set(len(self._queue) == 0 and almost_done)
-
-        if len(self._queue) == 0:
-            self.o.set(NULL)
-        else:
-            acceleration = self._queue.pop(0)
-            self.o.set(acceleration)
 
 class AccelerationUpdateController(Logic):
     def __init__(self):
@@ -352,56 +236,11 @@ class AccelerationUpdater(Logic):
                 _ao = _fragment.a + _ai
             ao.set(_ao)
         
-class ComputePipeline:
-    def __init__(self,i, m):
-        self._reference = m.add(Register(f"reference-{i}"))
-        self.filter_bank = [m.add(ParticleFilter(i,j)) for j in range(N_FILTER)]
-        self.filters_empty = m.add(And(N_FILTER,f"filters-empty-{i}"))
-        self.pair_queue = m.add(PairQueue(i))
-        self.force_pipeline = m.add(ForcePipeline(i))
-
-        almost_done_signals = [
-            position_read_controller.done,
-            self.filters_empty.o,
-            self.pair_queue.empty,
-            self.force_pipeline.empty
-        ]
-        self.almost_done = m.add(And(len(almost_done_signals),f"almost-done-{i}"))
-        self.pipeline_reader = m.add(PipelineReader(i))
-        
-        # filter_bank inputs
-        self.i = [f.neighbor for f in self.filter_bank]
-        for f in self.filter_bank:
-            connect(self._reference.o, f.reference)
-        self.reference = self._reference.i
-
-        # filters_empty inputs
-        for f, i in zip(self.filter_bank, self.filters_empty.i):
-            connect(f.empty, i)
-
-        # pair_queue inputs
-        for f, i in zip(self.filter_bank, self.pair_queue.i):
-            connect(f.o, i)
-
-        # force_pipeline inputs
-        connect(self.pair_queue.o, self.force_pipeline.i)
-
-        # almost_done inputs
-        for signal, i in zip(almost_done_signals, self.almost_done.i):
-            connect(signal, i)
-
-        # pipeline_reader inputs
-        connect(self.force_pipeline.o, self.pipeline_reader.i)
-        connect(self.almost_done.o, self.pipeline_reader.almost_done)
-
-        # external inputs
-        self.o = self.pipeline_reader.o
-        self.done = self.pipeline_reader.done
 
 position_read_controller = m.add(PositionReadController())
 position_reader = m.add(PositionReader())
 
-compute_pipelines = [ComputePipeline(pidx,m) for pidx in range(N_PIPELINE)]
+compute_pipelines = [ComputePipeline(pidx, position_read_controller, m) for pidx in range(N_PIPELINE)]
 
 acceleration_update_controller = m.add(AccelerationUpdateController())
 acceleration_updater = m.add(AccelerationUpdater())
@@ -432,7 +271,7 @@ connect(position_read_controller.oaddr, position_reader.addr)
 # ==== FORCE EVALUATION ====
 # compute_pipeline inputs
 for pidx in range(N_PIPELINE):
-    outputs = position_reader.o
+    outputs = position_reader.o[pidx]
     inputs = compute_pipelines[pidx].i
     for o, i in zip(outputs, inputs):
         connect(o,i)

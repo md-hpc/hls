@@ -2,6 +2,7 @@ from hls import *
 import random
 from collections import deque
 from math import floor
+import numpy
 
 '''
 constants, structures, and variables to be used by the phase{1,2,3}.py files
@@ -23,33 +24,65 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 
 m = MockFPGA()
 
-# Emulator constants
+# Emulator parameters
 T = 5 # number of timesteps to simulate
 UNIVERSE_SIZE = 3 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
 EPSILON = 0.1 # LJ const
 SIGMA = 0.8 # LJ const
 DT = 0.1 # timestep length
 DENSITY = 10 # particles per cell
+SEED = 1 # Random seed for particle initialization
 
 # depth of computation pipelines. Your emulator should be robust to any value of these
-FORCE_PIPELINE_STAGES = 70
-FILTER_PIPELINE_STAGES = 13  
+FORCE_PIPELINE_STAGES = 0
+FILTER_PIPELINE_STAGES = 0  
 # Number of compute pipelines working in parallel
 N_PIPELINE = 7
+
+# constants
+N_FILTER = 14 # number of filters per force pipeline
+BSIZE = 512 # bram size
+DBSIZE = BSIZE//2 # double buffer buffer size
 
 # derrived from above
 N_CELL = UNIVERSE_SIZE ** 3
 CUTOFF = SIGMA * 2.5
 N_PARTICLE = N_CELL * DENSITY
 L = CUTOFF * UNIVERSE_SIZE
-N_FILTER = 14 # plz don't change
+N_IDENT = N_CELL*BSIZE
+
+
+def modm(n, m):
+    if abs(n) < abs(n%m):
+        return n
+    else:
+        return n%m
+
+def n3l(reference,neighbor):
+    if type(reference) is not type(neighbor):
+        raise TypeError(f"Called n3l with mismatched {type(reference)} and {type(neighbor)}")
+    if type(reference) is list:
+        return _n3l([modm((n-r),UNIVERSE_SIZE) for r,n in zip(reference, neighbor)])
+    if type(reference) is numpy.ndarray:
+        return _n3l((modm(neighbor-reference,L)).tolist())
+    if type(reference) is int:
+        return _n3l([modm(n-r,UNIVERSE_SIZE) for r,n in zip(cubic_idx(reference), cubic_idx(neighbor))])
+    raise TypeError(f"Called n3l with unsupported {type(reference)}")
+
+def _n3l(pos):
+    for p in pos:
+        if p < 0:
+            return False
+        if p > 0:
+            return True
+    return True # want to include [0, 0, 0]
 
 # converts (i,j,k) tuple to linear idx and back
 def linear_idx(i,j,k):
     return (i%UNIVERSE_SIZE) + (j%UNIVERSE_SIZE)*UNIVERSE_SIZE + (k%UNIVERSE_SIZE)*UNIVERSE_SIZE**2
 
 def cubic_idx(i):
-    return i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE
+    return [i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE]
 
 class neighborhood:
     def __init__(self, cell):
@@ -59,10 +92,11 @@ class neighborhood:
         for di in range(-1,2):
             for dj in range(-1,2):
                 for dk in range(-1,2):
-                    if di < 0 or di == 0 and dj < 0 or di == 0 and dj == 0 and dk < 0:
+                    if not n3l([0,0,0],[di,dj,dk]):
                         continue
                     yield linear_idx(i+di, j+dj, k+dk)
-
+sz = sum([1 for _ in neighborhood(0)])
+assert sz == N_FILTER, f"Neighborhood size ({sz}) != N_FILTER ({N_FILTER})"
 
 # structs to hold particle data while it's passing through pipelines
 class Struct:
@@ -76,13 +110,34 @@ class Struct:
         return self.ident == obj.ident and self.cell == obj.cell and self.addr == obj.addr
     
     def __str__(self):
-        return f"({self.cell}, {self.addr}), {getattr(self,self.ident)}"
+        return f"{self.origin()}, {getattr(self,self.ident)}"
+
+    def origin(self):
+        return f"({cubic_idx(self.cell)}, {self.addr})"
 
 Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
 Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
 Acceleration = lambda a, addr, cell: Struct(a, addr, cell, "a")
 
 cell_from_position = lambda r: linear_idx(*[floor(x/CUTOFF)%UNIVERSE_SIZE for x in r])
+
+# identifiers so we can track whether or not the compute units are recieving all and only expected inputs
+ident = lambda p: p.cell*BSIZE + p.addr
+pair_ident = lambda p1, p2: N_IDENT*ident(p1) + ident(p2)
+
+def ident_to_p(ident):
+    cell = ident // BSIZE
+    addr = ident % BSIZE
+    return cubic_idx(cell), addr
+
+def pi_to_p(pi):
+    ident1 = pi // N_IDENT
+    ident2 = pi % N_IDENT
+    reference = ident_to_p(ident1)
+    neighbor = ident_to_p(ident2)
+    return reference, neighbor
+
+
 
 # if you're confused about what this does, ask me (Vance)
 class CacheMux(Logic):
@@ -150,6 +205,17 @@ class And(Logic):
             all([i.get() for i in self.i])
         )
 
+def nul(outputs):
+    for o in outputs:
+        o.set(NULL)
+
+
+def concat(*iters):
+    for it in iters:
+        for x in it:
+            yield x
+
+
 def init_bram(ident, mux_idents):
     caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
     imuxes = [m.add(CacheMux(f"{ident}-imux-{i}", mux_idents, ["i","iaddr"])) for i in range(N_CELL)]
@@ -159,15 +225,6 @@ def init_bram(ident, mux_idents):
         connect(imux.iaddr, cache.iaddr)
         connect(omux.oaddr, cache.oaddr)
     return caches, imuxes, omuxes
-
-class concat:
-    def __init__(self, *iters):
-        self.iters = iters
-
-    def __iter__(self):
-        for it in self.iters:
-            for x in it:
-                yield x
 
 p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
 a_caches, a_imuxes, a_omuxes = init_bram("a", ["phase1","phase2"])
