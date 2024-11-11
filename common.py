@@ -27,7 +27,7 @@ m = MockFPGA()
 
 # Emulator parameters
 T = 5 # number of timesteps to simulate
-UNIVERSE_SIZE = 3 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
+UNIVERSE_SIZE = 3 # size of one dimension of the universe
 EPSILON = 0.1 # LJ const
 SIGMA = 0.8 # LJ const
 DT = 0.1 # timestep length

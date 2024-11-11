@@ -15,7 +15,6 @@ def gen(t, *fargs):
     for i in range(N_PARTICLE):
         buf = fp.read(24)
         p[:,i] = np.frombuffer(buf)
-    print(p)
     return np.array_split(p,3)    
         
 
