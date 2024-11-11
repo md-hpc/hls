@@ -33,3 +33,11 @@ Double buffering is used to simplify particle migration between cells.
 Positions, velocities, and accelerations are represented as numpy arrays. While they flow through the logic, they are often packaged into structs (`class Structure` in `common.py`) that contain their cell and address of origin for control flow.
 
 Cell and particle distances modulo the universe dimensions are used to exploit N3L optimizations in the position readers and particle filters.
+
+# Verification
+While verification of the computed forces and positions themselves are NYI, there is a good deal of instrumentation in `compute_unit.py` to ensure that at each timestep, the particle filters are collectively only receiving particle pairs that they expect.
+
+This is done using a set structure that is computed using a set of for-loops that are (hopefully) easier to reason about than the emulator code itself. As the filters receive inputs, they compare them with the members of the set to see:
+* If the pair has been received already (duplicate)
+* If the pair should not have been sent (unexpected)
+* If any pairs in the set were not seen (expected)
