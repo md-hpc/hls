@@ -27,7 +27,7 @@ m = MockFPGA()
 
 # Emulator parameters
 T = 5 # number of timesteps to simulate
-UNIVERSE_SIZE = 4 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
+UNIVERSE_SIZE = 3 # size of one dimension of the universe. Means that we will have cells in the range (0:4, 0:4, 0:4)
 EPSILON = 0.1 # LJ const
 SIGMA = 0.8 # LJ const
 DT = 0.1 # timestep length
@@ -35,7 +35,7 @@ DENSITY = 10 # particles per cell
 SEED = 1 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
-# N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
+N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
 N_PPAR = 4 # particle parallelism
 N_CPAR = 8 # cell parallelism
 
@@ -203,10 +203,12 @@ class And(Logic):
             all([i.get() and i.get() is not NULL for i in self.i])
         )
 
-def nul(outputs):
-    for o in outputs:
-        o.set(NULL)
-
+def nul(out):
+    if type(out) is list:
+        for o in out:
+            o.set(NULL)
+    else:
+        out.set(NULL)
 
 def concat(*iters):
     for it in iters:

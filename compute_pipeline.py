@@ -38,6 +38,10 @@ def next_timestep(p_caches, pipeline_inputs, filter_inputs, filter_expect, doubl
                         exit()
                     filter_expect.add(pi)
     
+    n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
+    if n_particle != N_PARTICLE:
+        print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
+        exit(1)
     
 class ParticleFilter(Logic):
     def __init__(self,ident):
