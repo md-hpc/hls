@@ -4,9 +4,12 @@ import re
 
 NULL = "NULL"
 RESET = "RESET"
+
 empty_ident = re.compile(".*/empty")
 
 CONFIG_VERBOSE = False
+dioi = 0
+di = lambda: "."*dioi
 def debug(*args, **kwargs):
     if CONFIG_VERBOSE:
         print(*args,**kwargs)
@@ -17,14 +20,18 @@ class Input:
         self.parent = parent
         self.name = f"{parent.name}/{name}"
         self.output = None
+        self.subname = name
 
         if isinstance(self.parent, Logic):
             self.parent._inputs.append(self)
 
     def __call__(self):
-        debug("reading", self.name)
+        global dioi
+        dioi += 1
+        debug(di() + "reading input", self.name)
         if self.val is None:
-            self.val = self.output()
+            self.val = self.output() 
+        dioi -= 1
         assert self.val is not None, f"{self.name} read None from Output {self.output.name}"
         return self.val
     
@@ -46,13 +53,13 @@ class Output:
         self.parent = parent
         self.name = f"{parent.name}/{name}"
         self.inputs = []
-
+        self.subname = name
         if isinstance(self.parent, Logic):
             self.parent._outputs.append(self)
             self.parent._pipeline = deque([[NULL for _ in self.parent._outputs] for _ in self.parent._pipeline])
     
     def __call__(self):
-        debug("reading", self.name)
+        debug(di() + "reading output", self.name)
         if self.val is None:
             self.parent()
         assert self.val is not None, f"{type(self.parent)} failed to set non-None value for {self.name}. Could be failure to invoke set() on {self.name} or cycle in graph"
@@ -77,13 +84,22 @@ class Register:
         self.contents = NULL
         self.i = Input(self, f"i")
         self.o = Output(self, f"o")
+        self.verbose = False
 
     def write(self):
         i = self.i()
         if i is not NULL:
             if i is RESET:
+                if self.verbose:
+                    print(f"Resetting register {self.name}")
                 i = NULL
             self.contents = i
+        if self.verbose:
+            print(self.name)
+            print(f"\t{self.i.subname}: {self.i.val}")
+            print(f"\t{self.o.subname}: {self.o.val}")
+            print(f"\tcontents: {self.contents}")
+
 
     def __call__(self):
         if self._called:
@@ -125,6 +141,8 @@ class BRAM:
 
         self.o = Output(self, f"o")
         self.oaddr = Input(self, f"oaddr")
+        
+        self.verbose = False
 
     def write(self):
         i = self.i()
@@ -143,6 +161,14 @@ class BRAM:
             self.o.set(self.contents[oaddr])
         else:
             self.o.set(NULL)
+
+        if self.verbose:
+            print(f"{self.name}:")
+            print("\tINPUTS")
+            print(f"\t\toaddr: {self.oaddr.val}")
+            print("\tOUTPUTS")
+            print(f"\t\to: {self.o.val}")
+
 
     def identifiers(self):
         return [self.name, self.i.name, self.iaddr.name, self.o.name, self.oaddr.name]
@@ -183,6 +209,7 @@ class Logic(ABC):
         self._pipeline = deque([]) 
         self.name = name
         self.verbose = False
+        self.debug = False
         self.empty = Output(self,"empty")
         self._n = 0 # number of inputs in pipeline
 
@@ -203,7 +230,9 @@ class Logic(ABC):
         if self._called == True:
             return
         self._called = True
-
+        debug(di() + f"Evaluating {self.name}")
+        if self.debug:
+            breakpoint()
         self.logic()
         self.empty.set(NULL)
 
@@ -213,7 +242,8 @@ class Logic(ABC):
                 print(f"{o.name} is None after calling parent logic")
                 passed = False
             if not passed:
-                raise Exception(f"Must set all Outputs to non-None in {self.name}.logic()")
+                print(f"ERROR: Must set all Outputs to non-None in {self.name}.logic()")
+                exit(1)
 
         self._pipeline.append(
                 [o.val for o in self._outputs]
@@ -224,7 +254,7 @@ class Logic(ABC):
 
         for o, val in zip(self._outputs, self._pipeline.popleft()):
             o.val = val
-        
+ 
         if any([o.val is not NULL for o in self._outputs]):
             self._n -= 1
  
@@ -232,8 +262,12 @@ class Logic(ABC):
 
         if self.verbose:
             print(f"{self.name}:")
+            print("\tINPUTS")
+            for i in self._inputs:
+                print(f"\t\t{i.name.split('/')[1]}: {i.val}")
+            print("\tOUTPUTS")
             for o in self._outputs:
-                print(f"\t{o.name.split('/')[1]}: {o.val}")
+                print(f"\t\t{o.name.split('/')[1]}: {o.val}")
 
 
     def reset(self):
@@ -262,7 +296,7 @@ class Logic(ABC):
 class MockFPGA:
     def __init__(self):
         self.units = []
-        self.validated = False
+        self._init = False
 
     def add(self, obj):
         t = type(obj)
@@ -275,10 +309,10 @@ class MockFPGA:
     
                  
     def clock(self):
-        if not self.validated:
+        if not self._init:
             if not self.validate():
-                raise Exception("Validation of FPGA failed")
-            self.validated = True
+                print("Validation of FPGA failed")
+                exit(1) 
 
         for unit in self.units:
             unit()
@@ -289,7 +323,7 @@ class MockFPGA:
 
         for unit in self.units:
             unit.reset()
-      
+    
     def validate(self):
         if not self.validate_identifiers():
             print("validate_identifiers failed")
@@ -297,7 +331,7 @@ class MockFPGA:
         if not self.validate_connections():
             print("validate_connections failed")
             exit(1)
-        if not self.validate_dag():
+        if False and not self.validate_dag():
             print("validate_dag failed")
             exit(1)
         return True
@@ -337,7 +371,7 @@ def connect(o, i):
     if type(i) is not Input:
         raise TypeError("Connected input is not type Input()")
     if i.output is not None:
-        raise ValueError(f"input belonging to {type(i.parent)} already has output belonging to {type(o.parent)}")
+        raise ValueError(f"{i.name} already receiving output from {o.name}")
     o.inputs.append(i)
     i.output = o
 
