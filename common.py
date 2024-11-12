@@ -26,12 +26,12 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 m = MockFPGA()
 
 # Emulator parameters
-T = 5 # number of timesteps to simulate
-UNIVERSE_SIZE = 3 # size of one dimension of the universe
-EPSILON = 0.1 # LJ const
+T = 1000 # number of timesteps to simulate
+DT = 1e-1 # timestep length
+UNIVERSE_SIZE = 1 # size of one dimension of the universe
+EPSILON = 1 # LJ const
 SIGMA = 0.8 # LJ const
-DT = 0.1 # timestep length
-DENSITY = 10 # particles per cell
+DENSITY = 40 # particles per cell
 SEED = 1 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
@@ -50,7 +50,7 @@ CUTOFF = SIGMA * 2.5
 N_PARTICLE = N_CELL * DENSITY
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
-
+LJ_MAX = None
 
 # mod min, used to "center" our universe at our reference for N3L comparisons
 def modm(n, m):
@@ -94,7 +94,6 @@ def neighborhood(cell, full=False):
                     continue
                 yield linear_idx(i+di, j+dj, k+dk)
 sz = sum([1 for _ in neighborhood(0)])
-assert sz == N_FILTER, f"Neighborhood size ({sz}) != N_FILTER ({N_FILTER})"
 
 # structs to hold particle data while it's passing through pipelines
 class Struct:
@@ -216,9 +215,17 @@ def concat(*iters):
             yield x
 
 
-def lj(reference, neighbor):
+def _lj(reference, neighbor):
     r = norm(reference - neighbor)
     return 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(neighbor - reference)/r
+
+def lj(reference, neighbor):
+    f = _lj(reference, neighbor)
+    return numpy.minimum(numpy.abs(f), LJ_MAX) * numpy.sign(f)
+    
+
+_lj_max = _lj(numpy.array([0., 0., 0.]), numpy.array([(26/7)**(1/6)*SIGMA, 0., 0.]))[0]
+LJ_MAX = 4*numpy.array([_lj_max, _lj_max, _lj_max])
 
 def db(double_buffer):
     return DBSIZE if double_buffer else 0
@@ -231,6 +238,11 @@ def bram_enum(cache, double_buffer):
     a1 = a0 + DBSIZE
     for addr, val in enumerate(cache[a0:a1]):
         yield addr + a0, val
+
+def sort_contents(contents):
+    s = lambda a: int.from_bytes(a[1][0])
+    contents.sort(key=s)
+    return [[i for i,x in c] for c in contents], [[x for x in c] for c in contents]
 
 
 def init_bram(ident, mux_idents):
