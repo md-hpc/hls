@@ -61,6 +61,7 @@ class PositionReadController(Logic):
         ready = self.ready.get() 
 
         if ready and self._cell_r >= N_CELL:
+            print("waiting for pipelines and queues to flush")
             self.halt()
             return
         

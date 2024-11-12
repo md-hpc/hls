@@ -108,7 +108,7 @@ class PositionUpdater(Logic):
             if _pi is NULL and _vi is NULL:
                 continue
         
-            new_p = _pi + _vi*DT
+            new_p = (_pi + _vi*DT) % L
             new_cell = cell_from_position(new_p)
             self._queues[new_cell].append((new_p, _vi))
 

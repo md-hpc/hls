@@ -136,7 +136,7 @@ class ForcePipeline(Logic):
             exit(1)
         self.input_set.add(pi)
 
-        f = lj(reference.r, neighbor.r)
+        f = lj(reference.r, neighbor.r) * DT
 
         self.o.set([
             Acceleration(cell = reference.cell, addr = reference.addr, a = f),
