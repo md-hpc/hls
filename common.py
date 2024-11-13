@@ -5,6 +5,10 @@ from math import floor
 import numpy
 from numpy.linalg import norm
 
+import os
+from os.path import dirname, join
+import shutil
+
 '''
 constants, structures, and variables to be used by the phase{1,2,3}.py files
 
@@ -25,13 +29,20 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 
 m = MockFPGA()
 
+# verify.py and emulator.py will store their computed position data here
+# viz.py will look here for data to render. Don't want anything from old runs to be rendered
+RECORDS_PATH = join(dirname(__file__),"records")
+shutil.rmtree(RECORDS_PATH)
+os.mkdir(RECORDS_PATH)
+
+
 # Emulator parameters
 T = 1000 # number of timesteps to simulate
-DT = 1e-1 # timestep length
-UNIVERSE_SIZE = 1 # size of one dimension of the universe
-EPSILON = 1 # LJ const
-SIGMA = 0.8 # LJ const
-DENSITY = 40 # particles per cell
+DT = 1e-2 # timestep length
+UNIVERSE_SIZE = 3 # size of one dimension of the universe
+EPSILON = 5 # LJ const
+SIGMA = 1 # LJ const
+DENSITY = 20 # particles per cell
 SEED = 1 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
