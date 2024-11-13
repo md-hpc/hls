@@ -29,26 +29,22 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 
 m = MockFPGA()
 
-# verify.py and emulator.py will store their computed position data here
-# viz.py will look here for data to render. Don't want anything from old runs to be rendered
-RECORDS_PATH = join(dirname(__file__),"records")
-shutil.rmtree(RECORDS_PATH)
-os.mkdir(RECORDS_PATH)
-
-
 # Emulator parameters
 T = 1000 # number of timesteps to simulate
 DT = 1e-2 # timestep length
 UNIVERSE_SIZE = 3 # size of one dimension of the universe
-EPSILON = 5 # LJ const
+EPSILON = 40 # LJ const
 SIGMA = 1 # LJ const
-DENSITY = 20 # particles per cell
-SEED = 1 # Random seed for particle initialization
+DENSITY = 10 # particles per cell
+SEED = 0 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
 N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
 N_PPAR = 4 # particle parallelism
 N_CPAR = 8 # cell parallelism
+
+VERIFY_COMPUTED = True # At every timestep, use verify.compute_targets to compare the emulator's computations with what they should be
+ERR_TOLERANCE = 1e-4 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
 
 # constants
 N_FILTER = 14 # number of filters per force pipeline
@@ -58,10 +54,10 @@ DBSIZE = BSIZE//2 # double buffer buffer size
 # derrived from above
 N_CELL = UNIVERSE_SIZE ** 3
 CUTOFF = SIGMA * 2.5
-N_PARTICLE = N_CELL * DENSITY
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
 LJ_MAX = None
+N_PARTICLE = N_CELL * DENSITY
 
 # mod min, used to "center" our universe at our reference for N3L comparisons
 def modm(n, m):
@@ -228,7 +224,10 @@ def concat(*iters):
 
 def _lj(reference, neighbor):
     r = norm(reference - neighbor)
-    return 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(neighbor - reference)/r
+    if r == 0:
+        return 0.
+    else:
+        return 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(neighbor - reference)/r
 
 def lj(reference, neighbor):
     f = _lj(reference, neighbor)
@@ -250,11 +249,13 @@ def bram_enum(cache, double_buffer):
     for addr, val in enumerate(cache[a0:a1]):
         yield addr + a0, val
 
-def sort_contents(contents):
-    s = lambda a: int.from_bytes(a[1][0])
-    contents.sort(key=s)
-    return [[i for i,x in c] for c in contents], [[x for x in c] for c in contents]
 
+# verify.py and emulator.py will store their computed position data here
+# viz.py will look here for data to render. Don't want anything from old runs to be rendered
+def clear_records():
+    path = join(dirname(__file__),"records")
+    shutil.rmtree(path)
+    os.mkdir(path)
 
 def init_bram(ident, mux_idents):
     caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]

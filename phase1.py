@@ -130,10 +130,10 @@ class PositionReadController(Logic):
 
 
         if self._new_reference is NULL:
-            state = "neighbor"
+            state = "reading neighbors"
         else:
-            state = "reference"
-        print(f"{state}: cell_r=={self._cell_r} addr=={addr} addr_r=={self._addr_r} addr_n=={self._addr_n}")
+            state = "loading references"
+        print(f"{state}, cell_r=={self._cell_r} addr=={addr} addr_r=={self._addr_r} addr_n=={self._addr_n}")
         
         
 

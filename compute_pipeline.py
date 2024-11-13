@@ -4,17 +4,24 @@ from numpy.linalg import norm
 
 VERBOSE = False
 
-def next_timestep(p_caches, pipeline_inputs, filter_inputs, filter_expect, double_buffer):
+
+def next_timestep(p_caches, pipeline_inputs, pipeline_expect, filter_inputs, filter_expect, double_buffer):
     pipeline_inputs.clear()
     filter_inputs.clear()
 
     for pi in filter_expect:
         r, n = pi_to_p(pi)
-        # print(f"expected {r} {n}")
+        print(f"expected {r} {n}")
     if len(filter_expect):
         print(f"Filter banks from last timestep did not recieve all expected inputs. {len(filter_expect)} missing")
         exit()
-    
+
+    for pi in pipeline_expect:
+        r, n = pi_to_p(pi)
+        print(f"expected {r} {n}")
+    if len(pipeline_expect):
+        print(f"Pipelines from last timestep did not recieve all expected inputs. {len(pipeline_expect)} missing")
+        exit()
 
     for cell_r, _ in enumerate(p_caches):
          for cell_n in neighborhood(cell_r):
@@ -37,7 +44,9 @@ def next_timestep(p_caches, pipeline_inputs, filter_inputs, filter_expect, doubl
                         print("duplicate in verify!!")
                         exit()
                     filter_expect.add(pi)
-    
+                    if norm(r-n) < CUTOFF and n3l(cell_r, cell_n) and n3l(r,n) and not (cell_r == cell_n and addr_r == addr_n):
+                        pipeline_expect.add(pi)
+
     n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
     if n_particle != N_PARTICLE:
         print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
@@ -65,8 +74,6 @@ class ParticleFilter(Logic):
             self.o.set(NULL)
             return
        
-        if VERBOSE:
-            print(reference.origin(), neighbor.origin())
         pi = pair_ident(reference, neighbor)
         if pi in self.input_set:
             print(f"Filter bank recieved duplicate pair from origin {pi_to_p(pi)}")
@@ -77,14 +84,13 @@ class ParticleFilter(Logic):
             exit()
         self.input_expect.remove(pi)
 
+        if not n3l(reference.r, neighbor.r):
+            self.o.set(NULL)
+            return
         if reference == neighbor:
             self.o.set(NULL)
             return
 
-        if not n3l(reference.r, neighbor.r):
-            self.o.set(NULL)
-            return
-        
         r = norm(reference.r - neighbor.r)
         if r == 0:
             print(f"{self.name} received duplicate position: {reference} and {neighbor}")
@@ -121,7 +127,9 @@ class ForcePipeline(Logic):
      
         self.pipeline(FORCE_PIPELINE_STAGES)
         
-        self.input_set = None        
+        self.input_set = None
+        self.input_expect = None
+
     def logic(self):
         i = self.i.get()
         if i is NULL:
@@ -135,6 +143,7 @@ class ForcePipeline(Logic):
             print(f"duplicate: {reference}, {neighbor}")
             exit(1)
         self.input_set.add(pi)
+        self.input_expect.remove(pi)
 
         f = lj(reference.r, neighbor.r) * DT
 

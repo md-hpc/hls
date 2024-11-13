@@ -47,10 +47,10 @@ class PositionUpdateController(Logic):
         self.done.set(False)
 
         if self._overwrite_addr is NULL:
-            print(f"phase3: reading addrs {self._raddr}")
+            print(f"reading addrs {self._raddr}")
             self._raddr += 1
         else:
-            print(f"phas3: resetting addrs {self._overwrite_addr}")
+            print(f"resetting addrs {self._overwrite_addr}")
             self._overwrite_addr += 1
             if self._overwrite_addr == ndb(double_buffer) + DBSIZE:
                 self._overwrite_addr = NULL

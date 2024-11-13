@@ -3,27 +3,16 @@ from random import random, seed
 from math import floor
 import math
 
-N_PARTICLE = 1
-T = 100
-DT = 1e-2
-
-P25 = floor(N_PARTICLE*.25)
-P50 = floor(N_PARTICLE*.50)
-P75 = floor(N_PARTICLE*.75)
-
 def compute_targets(positions, velocities):
     accelerations = [[numpy.zeros_like(r) for r in cell] for cell in positions]
     for cell_r in range(N_CELL):
         for addr_r, reference in enumerate(positions[cell_r]):
            for cell_n in neighborhood(cell_r):
                 for addr_n, neighbor in enumerate(positions[cell_n]):
-                    if not n3l(reference,neighbor) or cell_n == cell_r and addr_n == addr_r:
-                        continue
                     if norm(reference-neighbor) >= CUTOFF:
                         continue
                     f = lj(reference,neighbor)
                     accelerations[cell_r][addr_r] += f * DT
-                    accelerations[cell_n][addr_n] += -1.0 * f * DT
     
     new_positions = [[] for _ in range(N_CELL)]
     new_velocities = [[] for _ in range(N_CELL)]
@@ -41,18 +30,30 @@ def compute_targets(positions, velocities):
     return positions, velocities, accelerations
 
 if __name__ == "__main__":
+    T = 100
+    DT = 1e-2
+
+    P25 = floor(N_PARTICLE*.25)
+    P50 = floor(N_PARTICLE*.50)
+    P75 = floor(N_PARTICLE*.75)
+
+    clear_records()
     seed(SEED)
     positions = [[] for _ in range(N_CELL)]
     velocities = [[] for _ in range(N_CELL)]
-    for _ in range(1):
+    for _ in range(N_PARTICLE):
         r = numpy.array((random() * L, random() * L, random() * L))
+        v = numpy.array((EPSILON*random() - EPSILON/2, EPSILON*random() - EPSILON/2, EPSILON*random() - EPSILON/2)) 
         cell = cell_from_position(r)
         positions[cell].append(r)
-        velocities[cell].append(numpy.array([1., 0., 0.]))
+        velocities[cell].append(v)
 
     for t in range(T):
+        P = sum([sum(_v) for _v in velocities])/N_PARTICLE
+        KE = sum([sum([norm(v)**2/2 for v in _v]) for _v in velocities])/N_PARTICLE
+        print(f"Computing timestep {t}, KE={KE}, P={P}")
         positions, velocities, _ = compute_targets(positions, velocities)
-
+        
         with open(f'records/t{t}','wb') as fp:
             for contents in positions:
                 for particle in contents:
