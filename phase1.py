@@ -99,6 +99,7 @@ class PositionReadController(Logic):
                     self._cell_r += N_CPAR
                     if self._cell_r >= N_CELL:
                         # we've iterated over all cells. Terminate timestep
+                        print("done")
                         self.halt()
                         return
                     
@@ -229,6 +230,7 @@ class AccelerationUpdateController(Logic):
         self.o = [Output(self,f"o{i}") for i in range(N_CELL)]
         self.oaddr = [Output(self,f"oaddr-{i}") for i in range(N_CELL)]
         self.qempty = Output(self,"qempty")
+
 
     def logic(self):
         for inputs in self.i:

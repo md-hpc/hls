@@ -140,14 +140,87 @@ for mux in concat(v_imuxes, v_omuxes):
     connect(control_unit.phase2_ready, mux.phase2_ready)
     connect(control_unit.phase3_ready, mux.phase3_ready)
 
+# ==== VERIFICATION CODE ====
+VERIFY_COMPUTED = False
+
+# this is going to be computed in verify.py
+expected_interactions = None 
+
+# determine what inputs different logic units should expect to receive this timestep
+def compute_expected():
+    double_buffer = control_unit._double_buffer
+
+    pipeline_inputs.clear()
+    filter_inputs.clear()
+
+    for pi in filter_expect:
+        r, n = pi_to_p(pi)
+        print(f"expected {r} {n}")
+    if len(filter_expect):
+        print(f"Filter banks from last timestep did not recieve all expected inputs. {len(filter_expect)} missing")
+        exit()
+
+    for pi in pipeline_expect:
+        r, n = pi_to_p(pi)
+        print(f"expected {r} {n}")
+    if len(pipeline_expect):
+        print(f"Pipelines from last timestep did not recieve all expected inputs. {len(pipeline_expect)} missing")
+        exit()
+
+    for cell_r, _ in enumerate(p_caches):
+         for cell_n in neighborhood(cell_r):
+            if not n3l(cell_r, cell_n):
+                continue
+            r_cache = p_caches[cell_r]
+            n_cache = p_caches[cell_n]
+            for addr_r, r in bram_enum(r_cache.contents, double_buffer):
+                if r is NULL:
+                    continue
+                for addr_n, n in bram_enum(n_cache.contents, double_buffer):
+                    if n is NULL:
+                        continue
+                    assert addr_n // DBSIZE == double_buffer
+                    assert addr_r // DBSIZE == double_buffer
+                    reference = Position(cell = cell_r, addr = addr_r, r = r)
+                    neighbor = Position(cell = cell_n, addr = addr_n, r = n)
+                    pi = pair_ident(reference,neighbor)
+                    if pi in filter_expect:
+                        print("duplicate in verify!!")
+                        exit()
+                    filter_expect.add(pi)
+                    if norm(r-n) < CUTOFF and n3l(cell_r, cell_n) and n3l(r,n) and not (cell_r == cell_n and addr_r == addr_n):
+                        pipeline_expect.add(pi)
+    if VERIFY_COMPUTED:
+        passed = True
+        for pi in pipeline_expect:
+            if pi not in expected_interactions:
+                print(f"unexpected by verify: {pi_to_p(pi)}")
+                passed = False
+            else:
+                expected_interactions.remove(pi)
+        for pi in expected_interactions:
+            print(f"expected by verify: {pi_to_p(pi)}")
+            passed = False
+        if not passed:
+            print("pipeline_expect does not expect same interactions as verify")
+            exit(1)
+
+    n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
+    if n_particle != N_PARTICLE:
+        print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
+        exit(1)
+ 
+# compute what the positions, velocities, and accelerations should be based on a naive nested for-loop
 target_positions = None
 target_velocities = None
 target_accelerations = None
 VERIFY_COMPUTED = False
 
 
-def extract_contents(caches, indicies = False):
-    return [[[i,x.copy()] if indicies else x.copy() for i,x in enumerate(cache.contents) if x is not NULL] for cache in caches]
+def extract_contents(caches, indicies = False, double_buffer = None):
+    if double_buffer is None:
+        double_buffer = control_unit._double_buffer
+    return [[[i,x.copy()] if indicies else x.copy() for i,x in enumerate(cache.contents[db(double_buffer):db(double_buffer)+DBSIZE]) if x is not NULL] for cache in caches]
 
 def compare_contents(caches, targets):
     computed = extract_contents(caches, indicies = True)
@@ -164,15 +237,12 @@ def compare_contents(caches, targets):
     mismatch = False
     n_err = 0
     for cell, C, T in zip(range(N_CELL), computed, targets):
-        if len(C) != len(T):
-            print(f"Computed cell has {len(C)} particles while target cell has {len(T)} particles")
-            mismatch = True
         errs = []
         for c, t in zip(C,T):
             addr, c = c
-            err = norm(c-t)/norm(t)
+            err = norm(c-t)/(norm(t)+1e-5)
             if err > ERR_TOLERANCE:
-                errs.append([addr,f"{cell}, {addr} is incorrect. E={norm(c-t)/norm(t)}"])
+                errs.append([addr,f"{cell}, {addr} is incorrect. err={err}"])
                 n_err += 1
         s = lambda a: a[0]
         errs.sort(key=s)
@@ -185,7 +255,7 @@ def compare_contents(caches, targets):
     return not (mismatch or n_err)
 
 def phase1_handler():
-    global target_positions, target_velocities, target_accelerations
+    global target_positions, target_velocities, target_accelerations, expected_interactions
     if VERIFY_COMPUTED and not compare_contents(p_caches, target_positions):
         print("Positions are incorrect")
         exit(1)
@@ -193,7 +263,7 @@ def phase1_handler():
     positions = extract_contents(p_caches)
     velocities = extract_contents(v_caches)
     
-    target_positions, target_velocities, target_accelerations = compute_targets(positions, velocities)
+    target_positions, target_velocities, target_accelerations, expected_interactions = compute_targets(positions, velocities)
 
 def phase2_handler():
     if VERIFY_COMPUTED and not compare_contents(a_caches, target_accelerations):
@@ -218,8 +288,10 @@ for _ in range(N_PARTICLE):
         idx = cell_from_position(r)
         p_caches[idx].contents[cidx[idx]] = r
         v_caches[idx].contents[cidx[idx]] = numpy.array([0., 0., 0.])
+
         cidx[idx] += 1
 target_positions = extract_contents(p_caches)
+phase1_handler()
 # compute_pipeline.VERBOSE = True
 
 # compute_pipeline ensures the correctness of its own inputs using global state
@@ -235,13 +307,7 @@ for cp in phase1.compute_pipelines:
     cp.force_pipeline.input_set = pipeline_inputs
     cp.force_pipeline.input_expect = pipeline_expect
     #cp._reference.verbose = True
-
-compute_pipeline.next_timestep(p_caches, pipeline_inputs, pipeline_expect, filter_inputs, filter_expect, control_unit._double_buffer)
-print(len(pipeline_expect))
-
-if False:
-    phase1.position_read_controller.verbose = True
-    phase1.position_reader.verbose = True
+compute_expected()
 
 t = 0
 cycles_total = 0
@@ -257,7 +323,7 @@ with numpy.errstate(all="raise"):
                             assert b == 24, "uh oh"
 
             t0 = control_unit.t
-            compute_pipeline.next_timestep(p_caches, pipeline_inputs, pipeline_expect, filter_inputs, filter_expect, control_unit._double_buffer)
+            compute_expected()
             cycles_total += t
             t = 0
         print(f"CYCLE {control_unit.t}-{t}, {control_unit.phase}:", end=" ")

@@ -3,55 +3,7 @@ from common import *
 from numpy.linalg import norm
 
 VERBOSE = False
-
-
-def next_timestep(p_caches, pipeline_inputs, pipeline_expect, filter_inputs, filter_expect, double_buffer):
-    pipeline_inputs.clear()
-    filter_inputs.clear()
-
-    for pi in filter_expect:
-        r, n = pi_to_p(pi)
-        print(f"expected {r} {n}")
-    if len(filter_expect):
-        print(f"Filter banks from last timestep did not recieve all expected inputs. {len(filter_expect)} missing")
-        exit()
-
-    for pi in pipeline_expect:
-        r, n = pi_to_p(pi)
-        print(f"expected {r} {n}")
-    if len(pipeline_expect):
-        print(f"Pipelines from last timestep did not recieve all expected inputs. {len(pipeline_expect)} missing")
-        exit()
-
-    for cell_r, _ in enumerate(p_caches):
-         for cell_n in neighborhood(cell_r):
-            if not n3l(cell_r, cell_n):
-                continue
-            r_cache = p_caches[cell_r]
-            n_cache = p_caches[cell_n]
-            for addr_r, r in bram_enum(r_cache.contents, double_buffer):
-                if r is NULL:
-                    continue
-                for addr_n, n in bram_enum(n_cache.contents, double_buffer):
-                    if n is NULL:
-                        continue
-                    assert addr_n // DBSIZE == double_buffer
-                    assert addr_r // DBSIZE == double_buffer
-                    reference = Position(cell = cell_r, addr = addr_r, r = r)
-                    neighbor = Position(cell = cell_n, addr = addr_n, r = n)
-                    pi = pair_ident(reference,neighbor)
-                    if pi in filter_expect:
-                        print("duplicate in verify!!")
-                        exit()
-                    filter_expect.add(pi)
-                    if norm(r-n) < CUTOFF and n3l(cell_r, cell_n) and n3l(r,n) and not (cell_r == cell_n and addr_r == addr_n):
-                        pipeline_expect.add(pi)
-
-    n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
-    if n_particle != N_PARTICLE:
-        print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
-        exit(1)
-    
+   
 class ParticleFilter(Logic):
     def __init__(self,ident):
         super().__init__(f"particle-filter-{ident}")

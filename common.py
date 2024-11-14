@@ -57,7 +57,82 @@ CUTOFF = SIGMA * 2.5
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
 LJ_MAX = None
-N_PARTICLE = N_CELL * DENSITY
+N_PARTICLE = 64
+
+# if you're confused about what this does, ask me (Vance)
+class CacheMux(Logic):
+    def __init__(self, name, idents, prefixes):
+        super().__init__(name)
+        
+        self.opts = []
+        for ident in idents:
+            ctl = Input(self, f"{ident}-ready")
+            setattr(self, f"{ident}_ready", ctl)
+            
+            inputs = []
+            for prefix in prefixes:
+                i = Input(self,f"{prefix}-{ident}")
+                setattr(self, f"{prefix}_{ident}", i)
+                inputs.append(i)
+            
+            self.opts.append([ctl, inputs])
+
+        self.o = []
+        for prefix in prefixes:
+            o = Output(self,prefix)
+            setattr(self, prefix, o)
+            self.o.append(o)
+
+    def logic(self):
+        halt = True
+        for opt in self.opts:
+            if opt[0].get() != True:
+                continue
+            halt = False
+            for i, o in zip(opt[1], self.o):
+                o.set(i.get())
+
+        if halt:
+            for o in self.o:
+                o.set(NULL)
+
+class NullConst(Logic):
+    def __init__(self):
+        super().__init__("null-const")
+
+        self.o = Output(self,"o")
+
+    def logic(self):
+        self.o.set(NULL)
+
+class ResetConst(Logic):
+    def __init__(self):
+        super().__init__("reset-const")
+        self.o = Output(self,"o")
+
+    def logic(self):
+        self.o.set(RESET)
+
+
+def init_bram(ident, mux_idents):
+    caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
+    imuxes = [m.add(CacheMux(f"{ident}-imux-{i}", mux_idents, ["i","iaddr"])) for i in range(N_CELL)]
+    omuxes = [m.add(CacheMux(f"{ident}-omux-{i}", mux_idents, ["oaddr"])) for i in range(N_CELL)]
+    for imux, omux, cache in zip(imuxes, omuxes, caches):
+        connect(imux.i, cache.i)
+        connect(imux.iaddr, cache.iaddr)
+        connect(omux.oaddr, cache.oaddr)
+    return caches, imuxes, omuxes
+
+
+# reference these in the phase{1,2,3} files
+p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
+a_caches, a_imuxes, a_omuxes = init_bram("a", ["phase1","phase2"])
+v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase2","phase3"])
+
+null_const = m.add(NullConst())
+reset_const = m.add(ResetConst())
+
 
 # mod min, used to "center" our universe at our reference for N3L comparisons
 def modm(n, m):
@@ -127,12 +202,13 @@ cell_from_position = lambda r: linear_idx(*[floor(x/CUTOFF)%UNIVERSE_SIZE for x 
 
 # identifiers so we can track whether or not the compute units are recieving all and only expected inputs
 ident = lambda p: p.cell*BSIZE + p.addr
-pair_ident = lambda p1, p2: N_IDENT*ident(p1) + ident(p2)
+def pair_ident(p1, p2):
+    return N_IDENT*ident(p1) + ident(p2)
 
 def ident_to_p(ident):
     cell = ident // BSIZE
     addr = ident % BSIZE
-    return cubic_idx(cell), addr
+    return cell, addr
 
 def pi_to_p(pi):
     ident1 = pi // N_IDENT
@@ -142,60 +218,6 @@ def pi_to_p(pi):
     return reference, neighbor
 
 
-
-# if you're confused about what this does, ask me (Vance)
-class CacheMux(Logic):
-    def __init__(self, name, idents, prefixes):
-        super().__init__(name)
-        
-        self.opts = []
-        for ident in idents:
-            ctl = Input(self, f"{ident}-ready")
-            setattr(self, f"{ident}_ready", ctl)
-            
-            inputs = []
-            for prefix in prefixes:
-                i = Input(self,f"{prefix}-{ident}")
-                setattr(self, f"{prefix}_{ident}", i)
-                inputs.append(i)
-            
-            self.opts.append([ctl, inputs])
-
-        self.o = []
-        for prefix in prefixes:
-            o = Output(self,prefix)
-            setattr(self, prefix, o)
-            self.o.append(o)
-
-    def logic(self):
-        halt = True
-        for opt in self.opts:
-            if opt[0].get() != True:
-                continue
-            halt = False
-            for i, o in zip(opt[1], self.o):
-                o.set(i.get())
-
-        if halt:
-            for o in self.o:
-                o.set(NULL)
-
-class NullConst(Logic):
-    def __init__(self):
-        super().__init__("null-const")
-
-        self.o = Output(self,"o")
-
-    def logic(self):
-        self.o.set(NULL)
-
-class ResetConst(Logic):
-    def __init__(self):
-        super().__init__("reset-const")
-        self.o = Output(self,"o")
-
-    def logic(self):
-        self.o.set(RESET)
 
 class And(Logic):
     def __init__(self,n,name):
@@ -257,20 +279,3 @@ def clear_records():
     shutil.rmtree(path)
     os.mkdir(path)
 
-def init_bram(ident, mux_idents):
-    caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
-    imuxes = [m.add(CacheMux(f"{ident}-imux-{i}", mux_idents, ["i","iaddr"])) for i in range(N_CELL)]
-    omuxes = [m.add(CacheMux(f"{ident}-omux-{i}", mux_idents, ["oaddr"])) for i in range(N_CELL)]
-    for imux, omux, cache in zip(imuxes, omuxes, caches):
-        connect(imux.i, cache.i)
-        connect(imux.iaddr, cache.iaddr)
-        connect(omux.oaddr, cache.oaddr)
-    return caches, imuxes, omuxes
-
-p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
-a_caches, a_imuxes, a_omuxes = init_bram("a", ["phase1","phase2"])
-v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase2","phase3"])
-
-# reference these in the phase{1,2,3} files
-null_const = m.add(NullConst())
-reset_const = m.add(ResetConst())
