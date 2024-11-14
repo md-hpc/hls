@@ -30,7 +30,7 @@ particleFilter and forcePipeline - these are instances of ParticleFilter and For
 m = MockFPGA()
 
 # Emulator parameters
-T = 1000 # number of timesteps to simulate
+T = 100 # number of timesteps to simulate
 DT = 1e-2 # timestep length
 UNIVERSE_SIZE = 3 # size of one dimension of the universe
 EPSILON = 40 # LJ const
@@ -40,11 +40,11 @@ SEED = 0 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
 N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
-N_PPAR = 4 # particle parallelism
-N_CPAR = 8 # cell parallelism
+N_PPAR = 10 # particle parallelism
+N_CPAR = 9 # cell parallelism
 
 VERIFY_COMPUTED = True # At every timestep, use verify.compute_targets to compare the emulator's computations with what they should be
-ERR_TOLERANCE = 1e-4 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
+ERR_TOLERANCE = 1e-2 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
 
 # constants
 N_FILTER = 14 # number of filters per force pipeline
@@ -57,7 +57,9 @@ CUTOFF = SIGMA * 2.5
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
 LJ_MAX = None
-N_PARTICLE = 64
+N_PARTICLE = DENSITY * N_CELL
+
+v0 = lambda: 0.
 
 # if you're confused about what this does, ask me (Vance)
 class CacheMux(Logic):

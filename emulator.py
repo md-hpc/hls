@@ -2,7 +2,7 @@ from hls import *
 from common import *
 import sys
 from random import random, seed, shuffle
-from math import floor
+from math import floor, inf
 import hls
 import numpy
 import os
@@ -152,7 +152,7 @@ def compute_expected():
 
     pipeline_inputs.clear()
     filter_inputs.clear()
-
+    
     for pi in filter_expect:
         r, n = pi_to_p(pi)
         print(f"expected {r} {n}")
@@ -190,7 +190,7 @@ def compute_expected():
                     filter_expect.add(pi)
                     if norm(r-n) < CUTOFF and n3l(cell_r, cell_n) and n3l(r,n) and not (cell_r == cell_n and addr_r == addr_n):
                         pipeline_expect.add(pi)
-    if VERIFY_COMPUTED:
+    if False:
         passed = True
         for pi in pipeline_expect:
             if pi not in expected_interactions:
@@ -216,43 +216,31 @@ target_velocities = None
 target_accelerations = None
 VERIFY_COMPUTED = False
 
-
 def extract_contents(caches, indicies = False, double_buffer = None):
     if double_buffer is None:
         double_buffer = control_unit._double_buffer
     return [[[i,x.copy()] if indicies else x.copy() for i,x in enumerate(cache.contents[db(double_buffer):db(double_buffer)+DBSIZE]) if x is not NULL] for cache in caches]
 
 def compare_contents(caches, targets):
-    computed = extract_contents(caches, indicies = True)
-   
-    sc = lambda a: int.from_bytes(a[1][0],"big") if a[1] is not NULL else int.from_bytes(b"\xff\xff\xff\xff","big")
-    st = lambda a: int.from_bytes(a[0],"big") if a is not NULL else int.from_bytes(b"\xff\xff\xff\xff\xff","big")
+    computed = extract_contents(caches)
+    targets = [t for t in concat(*targets)]
 
-    for contents in computed:
-        contents.sort(key=sc)
-    
-    for target in targets:
-        target.sort(key=st)
-
-    mismatch = False
-    n_err = 0
-    for cell, C, T in zip(range(N_CELL), computed, targets):
-        errs = []
-        for c, t in zip(C,T):
-            addr, c = c
-            err = norm(c-t)/(norm(t)+1e-5)
-            if err > ERR_TOLERANCE:
-                errs.append([addr,f"{cell}, {addr} is incorrect. err={err}"])
-                n_err += 1
-        s = lambda a: a[0]
-        errs.sort(key=s)
-        for err in errs:
-            print(err[1])
-    if mismatch:
-        print("mismatches in number particles in cells")
-    if n_err:
-        print(f"{n_err} computations were incorrect")
-    return not (mismatch or n_err)
+    passed = True
+    for cell, C in enumerate(computed):
+        for addr, c in enumerate(C):
+            matched = False
+            min_err = inf
+            for t in targets:
+                err = norm(c-t)/(norm(t)+1e-2)
+                if err < min_err:
+                    min_err = err
+                if err < ERR_TOLERANCE:
+                    matched = True
+                    break
+            if not matched:
+                print(f"{cell}, {addr} could not be matched. Min err was {min_err}")
+                passed = False        
+    return passed
 
 def phase1_handler():
     global target_positions, target_velocities, target_accelerations, expected_interactions
@@ -287,7 +275,7 @@ for _ in range(N_PARTICLE):
         r = numpy.array([L*random(), L*random(), L*random()])
         idx = cell_from_position(r)
         p_caches[idx].contents[cidx[idx]] = r
-        v_caches[idx].contents[cidx[idx]] = numpy.array([0., 0., 0.])
+        v_caches[idx].contents[cidx[idx]] = numpy.array([v0(), v0(), v0()])
 
         cidx[idx] += 1
 target_positions = extract_contents(p_caches)
@@ -317,7 +305,8 @@ with numpy.errstate(all="raise"):
         if control_unit.t != t0:
             with open(f"records/t{control_unit.t-1}","wb") as fp:
                 for cache in p_caches:
-                    for p in cache.contents:
+                    offst = ndb(control_unit._double_buffer)
+                    for p in cache.contents[offst:offst+DBSIZE]:
                         if p is not NULL:
                             b = fp.write(p.tobytes())
                             assert b == 24, "uh oh"

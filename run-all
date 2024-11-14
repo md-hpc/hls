@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+./verify
+./viz
+mv md.gif md-ver.gif
+./run
+./viz
+mv md.gif md-emu.gif
