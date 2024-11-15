@@ -3,26 +3,23 @@ from random import random, seed
 from math import floor
 import math
 
-def compute_targets(positions, velocities):
+def compute_targets(positions, velocities, double_buffer):
     interactions = set()
 
     accelerations = [[numpy.zeros_like(r) for r in cell] for cell in positions]
     for cell_r in range(N_CELL):
         for addr_r, reference in enumerate(positions[cell_r]):
-            for cell_n in neighborhood(cell_r):
+            for cell_n in neighborhood(cell_r, full=True):
                 for addr_n, neighbor in enumerate(positions[cell_n]):
-                    if norm(reference-neighbor) >= CUTOFF:
-                        continue
-                    if cell_r == cell_n and addr_r == addr_n:
-                        continue
-                    if not n3l(reference,neighbor):
+                    r = Acceleration(cell = cell_r, addr = addr_r + double_buffer * DBSIZE, a = reference)
+                    n = Acceleration(cell = cell_n, addr = addr_n + double_buffer * DBSIZE, a = neighbor)
+                 
+                    if norm(modr(reference, neighbor)) >= CUTOFF or cell_r == cell_n and addr_r == addr_n:
                         continue
 
                     f = lj(reference,neighbor)
-                    accelerations[cell_r][addr_r] += f * DT
-                    accelerations[cell_n][addr_n] -= f * DT 
-                    r = Acceleration(cell = cell_r, addr = addr_r, a = None)
-                    n = Acceleration(cell = cell_n, addr = addr_n, a = None)
+                    accelerations[cell_r][addr_r] = accelerations[cell_r][addr_r] + f * DT
+                    
                     interactions.add(pair_ident(r,n))
 
     new_positions = [[] for _ in range(N_CELL)]

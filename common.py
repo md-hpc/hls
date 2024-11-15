@@ -8,6 +8,7 @@ from numpy.linalg import norm
 import os
 from os.path import dirname, join
 import shutil
+from random import random, seed
 
 '''
 constants, structures, and variables to be used by the phase{1,2,3}.py files
@@ -37,17 +38,17 @@ EPSILON = 40 # LJ const
 SIGMA = 1 # LJ const
 DENSITY = 10 # particles per cell
 SEED = 0 # Random seed for particle initialization
-FORCE_PIPELINE_STAGES = 0 # depth of computation pipeline
-FILTER_PIPELINE_STAGES = 0  # depth of filter pipeline
+FORCE_PIPELINE_STAGES = 70 # depth of computation pipeline
+FILTER_PIPELINE_STAGES = 13  # depth of filter pipeline
 N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
-N_PPAR = 10 # particle parallelism
-N_CPAR = 9 # cell parallelism
+N_PPAR = 4 # particle parallelism
+N_CPAR = 4 # cell parallelism
 
 VERIFY_COMPUTED = True # At every timestep, use verify.compute_targets to compare the emulator's computations with what they should be
 ERR_TOLERANCE = 1e-2 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
 
 # constants
-N_FILTER = 14 # number of filters per force pipeline
+N_FILTER = 18 # number of filters per force pipeline
 BSIZE = 512 # bram size
 DBSIZE = BSIZE//2 # double buffer buffer size
 
@@ -59,7 +60,8 @@ N_IDENT = N_CELL*BSIZE
 LJ_MAX = None
 N_PARTICLE = DENSITY * N_CELL
 
-v0 = lambda: 0.
+seed(SEED)
+v0 = lambda: EPSILON*(random() - 0.5)
 
 # if you're confused about what this does, ask me (Vance)
 class CacheMux(Logic):
@@ -143,24 +145,39 @@ def modm(n, m):
     else:
         return n%m
 
-def n3l(reference,neighbor):
-    if type(reference) is not type(neighbor):
-        raise TypeError(f"Called n3l with mismatched {type(reference)} and {type(neighbor)}")
-    if type(reference) is list:
-        return _n3l([modm((n-r),UNIVERSE_SIZE) for r,n in zip(reference, neighbor)])
-    if type(reference) is numpy.ndarray:
-        return _n3l([modm(r, L) for r in (neighbor-reference).tolist()])
-    if type(reference) is int:
-        return _n3l([modm(n-r,UNIVERSE_SIZE) for r,n in zip(cubic_idx(reference), cubic_idx(neighbor))])
-    raise TypeError(f"Called n3l with unsupported {type(reference)}")
+def modd(a,b):
+    # mod distance from a to b
+    opts = [(b-L)-a, b-a, (b+L)-a]
+    m = abs(opts[0])
+    mi = 0
+    for i, opt in enumerate(opts):
+        if abs(opt) < m:
+            m = abs(opt)
+            mi = i
+    return opts[mi]
+        
+def modr(reference, neighbor):
+    # mod distance from reference to neighbor (numpy araay)
+    r = numpy.zeros(3)
+    for i in range(3):
+        r[i] = modd(reference[i], neighbor[i])
+    return r
 
-def _n3l(pos):
-    for p in pos:
-        if p < 0:
+
+def n3l(reference,neighbor):
+    if type(reference) is not numpy.ndarray:
+        raise TypeError(f"Called n3l with unsupported {type(reference)}")
+    r = modr(reference, neighbor)
+    for i in range(3):
+        if r[i] < 0:
             return False
-        if p > 0:
+        if r[i] > 0:
             return True
-    return True # want to include [0, 0, 0]
+    return False # should not evaluate self wrt self
+
+def n3l_cell(cell_r, cell_n):
+    return (cubic_idx(cell_n)[0] - cubic_idx(cell_r)[0]) % UNIVERSE_SIZE <= 1
+
 
 # converts (i,j,k) tuple to linear idx and back
 def linear_idx(i,j,k):
@@ -171,14 +188,12 @@ def cubic_idx(i):
 
 def neighborhood(cell, full=False):
     i, j, k = cubic_idx(cell)
-    for di in range(-1,2):
+    for di in range(-1 if full else 0,2):
         for dj in range(-1,2):
             for dk in range(-1,2):
-                if not n3l([0,0,0],[di,dj,dk]) and not full:
-                    continue
                 yield linear_idx(i+di, j+dj, k+dk)
 sz = sum([1 for _ in neighborhood(0)])
-
+assert sz == N_FILTER, sz
 # structs to hold particle data while it's passing through pipelines
 class Struct:
     def __init__(self, data, addr, cell, ident):
@@ -194,7 +209,7 @@ class Struct:
         return f"{self.origin()}, {getattr(self,self.ident)}"
 
     def origin(self):
-        return f"({cubic_idx(self.cell)}, {self.addr})"
+        return f"({(self.cell)}, {self.addr})"
 
 Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
 Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
@@ -247,7 +262,8 @@ def concat(*iters):
 
 
 def _lj(reference, neighbor):
-    r = norm(reference - neighbor)
+    r = norm(modr(reference, neighbor))
+
     if r == 0:
         return 0.
     else:

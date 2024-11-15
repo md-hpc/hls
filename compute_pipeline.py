@@ -25,7 +25,7 @@ class ParticleFilter(Logic):
         if reference is NULL or neighbor is NULL:
             self.o.set(NULL)
             return
-       
+
         pi = pair_ident(reference, neighbor)
         if pi in self.input_set:
             print(f"Filter bank recieved duplicate pair from origin {pi_to_p(pi)}")
@@ -35,6 +35,7 @@ class ParticleFilter(Logic):
             print(f"Filter bank recieved particle from unexpected origin {pi_to_p(pi)}")
             exit()
         self.input_expect.remove(pi)
+         
 
         if not n3l(reference.r, neighbor.r):
             self.o.set(NULL)
@@ -42,11 +43,16 @@ class ParticleFilter(Logic):
         if reference == neighbor:
             self.o.set(NULL)
             return
-
-        r = norm(reference.r - neighbor.r)
+        
+        r = norm(modr(reference.r,neighbor.r))
         if r == 0:
             print(f"{self.name} received duplicate position: {reference} and {neighbor}")
             exit()
+        
+        if r >= CUTOFF:
+            self.o.set(NULL)
+            return
+
         self.o.set(
                 [reference, neighbor] if r < CUTOFF else NULL
         )
@@ -94,8 +100,10 @@ class ForcePipeline(Logic):
         if pi in self.input_set:
             print(f"duplicate: {reference}, {neighbor}")
             exit(1)
+        pi2 = pair_ident(neighbor, reference)
         self.input_set.add(pi)
         self.input_expect.remove(pi)
+        self.input_expect.remove(pi2)
 
         f = lj(reference.r, neighbor.r) * DT
 
