@@ -8,7 +8,8 @@ import numpy
 import os
 
 import compute_pipeline
-from verify import compute_targets
+import verify
+from verify import verify_emulator
 
 if "--naive" in sys.argv:
     import naive as  phase1
@@ -84,6 +85,7 @@ class ControlUnit(Logic):
         self.phase3_ready.set(self.phase == PHASE3)
 
 control_unit = m.add(ControlUnit())
+verify.CONTROL_UNIT = control_unit
 
 # control_unit inputs need to be buffered in registers to prevent cycles
 #
@@ -140,127 +142,6 @@ for mux in concat(v_imuxes, v_omuxes):
     connect(control_unit.phase2_ready, mux.phase2_ready)
     connect(control_unit.phase3_ready, mux.phase3_ready)
 
-# ==== VERIFICATION CODE ====
-VERIFY_COMPUTED = False
-
-# this is going to be computed in verify.py
-verify_interactions = None 
-
-target_positions = None
-VERIFY_COMPUTED = True
-
-def extract_contents(caches, indicies = False, double_buffer = None):
-    if double_buffer is None:
-        double_buffer = control_unit._double_buffer
-    return [[[i,x.copy()] if indicies else x.copy() for i,x in enumerate(cache.contents[db(double_buffer):db(double_buffer)+DBSIZE]) if x is not NULL] for cache in caches]
-
-def compare_contents(caches, targets):
-    computed = extract_contents(caches)
-    targets = [t for t in concat(*targets)]
-
-    passed = True
-    for cell, C in enumerate(computed):
-        for addr, c in enumerate(C):
-            matched = False
-            min_err = inf
-            for t in targets:
-                err = norm(modr(c, t))/(norm(t)+ERR_TOLERANCE)
-                if err < min_err:
-                    min_err = err
-                if err < ERR_TOLERANCE:
-                    matched = True
-                    break
-            if not matched:
-                print(f"{cell}, {addr} could not be matched. Min err was {min_err}")
-                passed = False        
-    return passed
-
-
-# verify the behavior of our pipeline for this timestep
-# and computed expected behavior for next timestep
-filter_inputs = set()
-filter_expect = set()
-pipeline_inputs = set()
-pipeline_expect = set()
-
-def verify_and_compute():
-    global target_positions
-    
-    if not compare_contents(p_caches, target_positions):
-        print("Positions are incorrect")
-        exit(1)
-    # input("Emulator outputs passed verification (press ENTER to continue)")
-
-    positions = extract_contents(p_caches)
-    velocities = extract_contents(v_caches)
-    target_positions, target_velocities, target_accelerations, verify_interactions = compute_targets(positions, velocities, control_unit._double_buffer)
-
-    double_buffer = control_unit._double_buffer
-
-    pipeline_inputs.clear()
-    filter_inputs.clear()
-    
-    for pi in filter_expect:
-        r, n = pi_to_p(pi)
-        print(f"expected {r} {n}")
-    if len(filter_expect):
-        print(f"Filter banks from last timestep did not recieve all expected inputs. {len(filter_expect)} missing")
-        exit(1)
-
-    for pi in pipeline_expect:
-        r, n = pi_to_p(pi)
-        print(f"expected {r} {n}")
-    if len(pipeline_expect):
-        print(f"Force pipelines from last timestep did not recieve all expected inputs. {len(pipeline_expect)} missing")
-        exit(1)
-
-    # this can almost definitely be merged with the for loop in verify.py
-    for cell_r, _ in enumerate(p_caches):
-         for cell_n in neighborhood(cell_r):
-            if not n3l_cell(cell_r, cell_n):
-                continue
-            r_cache = p_caches[cell_r]
-            n_cache = p_caches[cell_n]
-            for addr_r, r in bram_enum(r_cache.contents, double_buffer):
-                if r is NULL:
-                    continue
-                for addr_n, n in bram_enum(n_cache.contents, double_buffer):
-                    if n is NULL:
-                        continue
-                    reference = Position(cell = cell_r, addr = addr_r, r = r)
-                    neighbor = Position(cell = cell_n, addr = addr_n, r = n)
-                    pi = pair_ident(reference,neighbor)
-                    if pi in filter_expect:
-                        print("duplicate in verify!!")
-                        exit()
-                    filter_expect.add(pi)
-
-                    if norm(modr(r,n)) < CUTOFF and n3l(r,n):
-                        pipeline_expect.add(pair_ident(reference,neighbor))
-                        pipeline_expect.add(pair_ident(neighbor,reference))
-    
-    passed = True
-    for pi in pipeline_expect:
-        if pi not in verify_interactions:
-            print(f"unexpected by verify.py: {pi_to_p(pi)}")
-            passed = False
-        else:
-            verify_interactions.remove(pi)
-    for pi in verify_interactions:
-        print(f"expected by verify.py: {pi_to_p(pi)}")
-        passed = False
-    if not passed:
-        print(len(verify_interactions), len(pipeline_expect))
-        print(len(verify_interactions ^ pipeline_expect))
-        print("pipeline_expect does not expect same interactions as verify (bug in verification code)")
-        exit(1)
-
-    n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
-    if n_particle != N_PARTICLE:
-        print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
-        exit(1)
-    
-
 # simulation initialization
 clear_records()
 seed(SEED)
@@ -272,15 +153,7 @@ for _ in range(N_PARTICLE):
         v_caches[idx].contents[cidx[idx]] = numpy.array([v0(), v0(), v0()])
 
         cidx[idx] += 1
-target_positions = extract_contents(p_caches)
-verify_and_compute()
-
-for cp in phase1.compute_pipelines:
-    for f in cp.filter_bank:
-        f.input_set = filter_inputs
-        f.input_expect = filter_expect
-    cp.force_pipeline.input_set = pipeline_inputs
-    cp.force_pipeline.input_expect = pipeline_expect
+verify_emulator() # initialized the filter_expect and pipeline_expect sets
 
 if False:
     phase1.position_read_controller.verbose = True
@@ -292,7 +165,7 @@ t0 = control_unit.t
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
         if control_unit.t != t0:
-            verify_and_compute()
+            verify_emulator()
             t0 = control_unit.t
             cycles_total += t
             t = 0

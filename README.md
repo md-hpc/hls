@@ -37,7 +37,10 @@ Cell and particle distances modulo the universe dimensions are used to exploit N
 # Verification
 In `verify.py` a set of nested for-loops executes a procedural version of the emulator's algorithm. At the end of each timestep, the emulator compares the memory contents of the position caches with the positions computed by this procedural algorithm.
 
-For debugging purposes, the emulator also computes what it "expects" the particle filters and the force pipelines to actually recieve from the postion reader. This is done using set structures that are computed using another procedural algoirthm that is (hopefully) easier to reason about than the emulator code itself. As the filters receive inputs, they compare them with the members of the set to see:
+For debugging purposes, the emulator also computes what it "expects" the particle filters and the force pipelines to actually recieve from the postion reader. This is done using set structures that are computed as the procedural algorithm mentioned above runs. As the filters receive inputs, they compare them with the members of the set to see:
 * If the pair has been received already (duplicate)
 * If the pair should not have been sent (unexpected)
+
+And at the end of each timestep
+
 * If any pairs in the set were not seen (expected)

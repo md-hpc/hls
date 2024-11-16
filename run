@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python emulator.py -t
+python emulator.py

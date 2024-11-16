@@ -57,7 +57,7 @@ N_CELL = UNIVERSE_SIZE ** 3
 CUTOFF = SIGMA * 2.5
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
-LJ_MAX = None
+LJ_MAX = None # this will be computed below
 N_PARTICLE = DENSITY * N_CELL
 
 seed(SEED)
@@ -209,7 +209,7 @@ class Struct:
         return f"{self.origin()}, {getattr(self,self.ident)}"
 
     def origin(self):
-        return f"({(self.cell)}, {self.addr})"
+        return f"({cubic_idx(self.cell)}, {self.addr})"
 
 Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
 Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
@@ -225,7 +225,7 @@ def pair_ident(p1, p2):
 def ident_to_p(ident):
     cell = ident // BSIZE
     addr = ident % BSIZE
-    return cell, addr
+    return (cell), addr
 
 def pi_to_p(pi):
     ident1 = pi // N_IDENT

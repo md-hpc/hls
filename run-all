@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-./verify
+./direct
 ./viz
-mv md.gif md-ver.gif
+mv md.gif md-dir.gif
 ./run
 ./viz
 mv md.gif md-emu.gif
