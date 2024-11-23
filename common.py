@@ -36,7 +36,6 @@ parser.add_argument("-n","--particles", type=int, default=300)
 parser.add_argument("-u","--size", type=int, default=3)
 args = parser.parse_args()
 
-m = MockFPGA()
 
 # Emulator parameters
 T = args.time # number of timesteps to simulate
@@ -62,16 +61,19 @@ BSIZE = 512 # bram size
 DBSIZE = BSIZE//2 # double buffer buffer size
 
 # derrived from above
-N_CELL = UNIVERSE_SIZE ** 3
-CUTOFF = SIGMA * 2.5
-L = CUTOFF * UNIVERSE_SIZE
-N_IDENT = N_CELL*BSIZE
-LJ_MAX = None # this will be computed below
+N_CELL = UNIVERSE_SIZE ** 3 # total number of cells in universe
+CUTOFF = SIGMA * 2.5 # cutoff radius
+L = CUTOFF * UNIVERSE_SIZE # length of one side of the universe
+N_IDENT = N_CELL*BSIZE # maximum number of unique particles. Used for verification
 
 seed(SEED)
-v0 = lambda: EPSILON*(random() - 0.5)
 
-# if you're confused about what this does, ask me (Vance)
+
+# gives an initial position and velocity vector
+r0 = lambda: numpy.array([L*random() for _ in range(3)])
+v0 = lambda: numpy.array([EPSILON*(random() - 0.5) for _ in range(3)])
+
+# Muxes the inputs of a cache between phases
 class CacheMux(Logic):
     def __init__(self, name, idents, prefixes):
         super().__init__(name)
@@ -108,6 +110,7 @@ class CacheMux(Logic):
             for o in self.o:
                 o.set(NULL)
 
+# always writes NULL to self.o
 class NullConst(Logic):
     def __init__(self):
         super().__init__("null-const")
@@ -117,6 +120,7 @@ class NullConst(Logic):
     def logic(self):
         self.o.set(NULL)
 
+# always writes RESET to self.o
 class ResetConst(Logic):
     def __init__(self):
         super().__init__("reset-const")
@@ -126,6 +130,7 @@ class ResetConst(Logic):
         self.o.set(RESET)
 
 
+# creates a new array of BRAMs along with the muxes necessary to access it between phases
 def init_bram(ident, mux_idents):
     caches = [m.add(BRAM(512,f"{ident}-cache-{i}")) for i in range(N_CELL)]
     imuxes = [m.add(CacheMux(f"{ident}-imux-{i}", mux_idents, ["i","iaddr"])) for i in range(N_CELL)]
@@ -137,24 +142,8 @@ def init_bram(ident, mux_idents):
     return caches, imuxes, omuxes
 
 
-# reference these in the phase{1,2,3} files
-p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
-a_caches, a_imuxes, a_omuxes = init_bram("a", ["phase1","phase2"])
-v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase2","phase3"])
-
-null_const = m.add(NullConst())
-reset_const = m.add(ResetConst())
-
-
-# mod min, used to "center" our universe at our reference for N3L comparisons
-def modm(n, m):
-    if abs(n) < abs(n%m):
-        return n
-    else:
-        return n%m
-
+# one-dimensional modulo L distance from a to b
 def modd(a,b):
-    # mod distance from a to b
     opts = [(b-L)-a, b-a, (b+L)-a]
     m = abs(opts[0])
     mi = 0
@@ -164,14 +153,14 @@ def modd(a,b):
             mi = i
     return opts[mi]
         
+# three-dimensional modulo L distance from reference to neighbor
 def modr(reference, neighbor):
-    # mod distance from reference to neighbor (numpy araay)
     r = numpy.zeros(3)
     for i in range(3):
         r[i] = modd(reference[i], neighbor[i])
     return r
 
-
+# whether we should evaluate neighbor wrt reference under N3L half-shell method
 def n3l(reference,neighbor):
     if type(reference) is not numpy.ndarray:
         raise TypeError(f"Called n3l with unsupported {type(reference)}")
@@ -183,17 +172,21 @@ def n3l(reference,neighbor):
             return True
     return False # should not evaluate self wrt self
 
+# whether we should evaluate neighbor cell cell_n wrt reference cell cell_r under N3: half-shell method
 def n3l_cell(cell_r, cell_n):
     return (cubic_idx(cell_n)[0] - cubic_idx(cell_r)[0]) % UNIVERSE_SIZE <= 1
 
 
-# converts (i,j,k) tuple to linear idx and back
+# converts a cubic cell index [i,j,k] to a linear (integer) index
 def linear_idx(i,j,k):
     return (i%UNIVERSE_SIZE) + (j%UNIVERSE_SIZE)*UNIVERSE_SIZE + (k%UNIVERSE_SIZE)*UNIVERSE_SIZE**2
 
+# converts a linear (integer) cell index to a cubic index [i, j, k] 
 def cubic_idx(i):
     return [i%UNIVERSE_SIZE, i//UNIVERSE_SIZE%UNIVERSE_SIZE, i//UNIVERSE_SIZE**2%UNIVERSE_SIZE]
 
+# an iterator that gives all the neighbor cells we should evaluate wrt linear cell index cell
+# full == True will just yield all neighboring cells instead.
 def neighborhood(cell, full=False):
     i, j, k = cubic_idx(cell)
     for di in range(-1 if full else 0,2):
@@ -202,12 +195,13 @@ def neighborhood(cell, full=False):
                 yield linear_idx(i+di, j+dj, k+dk)
 sz = sum([1 for _ in neighborhood(0)])
 assert sz == N_FILTER, sz
+
 # structs to hold particle data while it's passing through pipelines
 class Struct:
     def __init__(self, data, addr, cell, ident):
-        self.cell = cell
-        self.addr = addr
-        self.ident = ident
+        self.cell = cell # cell of origin
+        self.addr = addr # addr of origin
+        self.ident = ident # an identifier for the attribute that will hold the actual data
         setattr(self, ident, data)
 
     def __eq__(self, obj):
@@ -223,6 +217,7 @@ Position = lambda r, addr, cell: Struct(r, addr, cell, "r")
 Velocity = lambda v, addr, cell: Struct(v, addr, cell, "v")
 Acceleration = lambda a, addr, cell: Struct(a, addr, cell, "a")
 
+# given a [x,y,z] position vector, gives the linear cell index of the cell it should be placed in
 cell_from_position = lambda r: linear_idx(*[floor(x/CUTOFF)%UNIVERSE_SIZE for x in r])
 
 # identifiers so we can track whether or not the compute units are recieving all and only expected inputs
@@ -230,11 +225,13 @@ ident = lambda p: p.cell*BSIZE + p.addr
 def pair_ident(p1, p2):
     return N_IDENT*ident(p1) + ident(p2)
 
+# helper
 def ident_to_p(ident):
     cell = ident // BSIZE
     addr = ident % BSIZE
     return (cell), addr
 
+# converts a pair ident generated by the above function back into the (cell1, addr1) (cell2, addr2) tuple that generated it
 def pi_to_p(pi):
     ident1 = pi // N_IDENT
     ident2 = pi % N_IDENT
@@ -242,8 +239,7 @@ def pi_to_p(pi):
     neighbor = ident_to_p(ident2)
     return reference, neighbor
 
-
-
+# self.o is a logical AND of all inputs
 class And(Logic):
     def __init__(self,n,name):
         super().__init__(name)
@@ -256,19 +252,21 @@ class And(Logic):
             all([i.get() and i.get() is not NULL for i in self.i])
         )
 
+# Sets list or nested list of Outputs to NULL
 def nul(out):
-    if type(out) is list:
-        for o in out:
-            o.set(NULL)
-    else:
+    if isinstance(out,Output):
         out.set(NULL)
+        return
+    for o in out:
+        nul(o)
 
+# lazily concatenates an array of iterators
 def concat(*iters):
     for it in iters:
         for x in it:
             yield x
 
-
+# helper
 def _lj(reference, neighbor):
     r = norm(modr(reference, neighbor))
 
@@ -277,26 +275,22 @@ def _lj(reference, neighbor):
     else:
         return 4.0*EPSILON*(6.0*SIGMA**6.0/r**7.0-12.0*SIGMA**12/r**13.0)*(neighbor - reference)/r
 
+# compute LJ force between two particles given their position
 def lj(reference, neighbor):
     f = _lj(reference, neighbor)
     return numpy.minimum(numpy.abs(f), LJ_MAX) * numpy.sign(f)
-    
 
 _lj_max = _lj(numpy.array([0., 0., 0.]), numpy.array([(26/7)**(1/6)*SIGMA, 0., 0.]))[0]
 LJ_MAX = 4*numpy.array([_lj_max, _lj_max, _lj_max])
 
+   
+# given the double_buffer signal from control_unit, computes the address offset into the BRAMs for this cycle
 def db(double_buffer):
     return DBSIZE if double_buffer else 0
 
+# negation of db()
 def ndb(double_buffer):
     return 0 if double_buffer else DBSIZE
-
-def bram_enum(cache, double_buffer):
-    a0 = db(double_buffer)
-    a1 = a0 + DBSIZE
-    for addr, val in enumerate(cache[a0:a1]):
-        yield addr + a0, val
-
 
 # verify.py and emulator.py will store their computed position data here
 # viz.py will look here for data to render. Don't want anything from old runs to be rendered
@@ -304,4 +298,13 @@ def clear_records():
     path = join(dirname(__file__),"records")
     shutil.rmtree(path)
     os.mkdir(path)
+
+
+# globally accessible FPGA elements
+m = MockFPGA()
+null_const = m.add(NullConst())
+reset_const = m.add(ResetConst())
+
+p_caches, p_imuxes, p_omuxes = init_bram("p", ["phase3","phase1"])
+v_caches, v_imuxes, v_omuxes = init_bram("v", ["phase1","phase3"])
 

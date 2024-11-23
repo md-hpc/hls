@@ -86,18 +86,22 @@ def verify_emulator():
     if target_positions is not None:
         passed = True
         for cell, P in enumerate(positions):
-            for addr, r in enumerate(P):
+            for addr_r, r in enumerate(P):
                 matched = False
                 min_err = inf
-                for t in concat(*target_positions):
-                    err = norm(modr(r, t))/(norm(t)+ERR_TOLERANCE)
-                    if err < min_err:
-                        min_err = err
-                    if err < ERR_TOLERANCE:
-                        matched = True
+                for T in target_positions:
+                    for addr_t, t in enumerate(T):
+                        err = norm(modr(r, t))/(norm(t)+ERR_TOLERANCE)
+                        if err < min_err:
+                            min_err = err
+                        if err < ERR_TOLERANCE:
+                            matched = True
+                            T.pop(addr_t)
+                            break
+                    if matched:
                         break
                 if not matched:
-                    print(f"{cell}, {addr} could not be matched. Min err was {min_err}")
+                    print(f"{cell}, {addr_r} could not be matched. Min err was {min_err}")
                     passed = False
 
         if not passed:

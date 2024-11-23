@@ -105,11 +105,11 @@ class ForcePipeline(Logic):
         self.input_expect.remove(pi)
         self.input_expect.remove(pi2)
 
-        f = lj(reference.r, neighbor.r) * DT
+        v = lj(reference.r, neighbor.r) * DT
 
         self.o.set([
-            Acceleration(cell = reference.cell, addr = reference.addr, a = f),
-            Acceleration(cell = neighbor.cell, addr = neighbor.addr, a = -1*f),
+            Velocity(cell = reference.cell, addr = reference.addr, v = v),
+            Velocity(cell = neighbor.cell, addr = neighbor.addr, v = -1*v),
         ])
 
 class PipelineReader(Logic):
@@ -140,7 +140,7 @@ class PipelineReader(Logic):
                 self._queue.append(self._reference)
                 self._reference = reference
             else:
-                self._reference.a += reference.a
+                self._reference.v += reference.v
             self._queue.append(neighbor)
 
         self.done.set(len(self._queue) == 0 and almost_done)
