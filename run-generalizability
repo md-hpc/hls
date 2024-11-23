@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+for n in 300 400 500; do
+	for N in 3 4 5; do
+		./run -n $n -u $N
+	done
+done

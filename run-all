@@ -1,7 +1,0 @@
-#!/usr/bin/env bash
-./direct
-./viz
-mv md.gif md-dir.gif
-./run
-./viz
-mv md.gif md-emu.gif

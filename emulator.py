@@ -21,11 +21,7 @@ else:
     import phase1
 
 import phase2
-
-if "-t" in sys.argv:
-    import faux_phase3 as phase3
-else:
-    import phase3
+import faux_phase3 as phase3
 
 
 
@@ -164,24 +160,18 @@ cycles_total = 0
 t0 = control_unit.t
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
+        print(f"CYCLE {control_unit.t}-{t} (p={N_PPAR}, c={N_CPAR}) {control_unit.phase}:", end=" ")
+        m.clock()
+        t += 1
         if control_unit.t != t0:
             verify_emulator()
             t0 = control_unit.t
             cycles_total += t
             t = 0
 
-            with open(f"records/t{control_unit.t-1}","wb") as fp:
-                for cache in p_caches:
-                    offst = ndb(control_unit._double_buffer)
-                    for p in cache.contents[offst:offst+DBSIZE]:
-                        if p is not NULL:
-                            b = fp.write(p.tobytes())
-                            assert b == 24, "uh oh"
 
-        print(f"CYCLE {control_unit.t}-{t}, {control_unit.phase}:", end=" ")
-        m.clock()
-        t += 1
- 
+
+cycles_total += t
 with open(f"records/t{control_unit.t-1}","wb") as fp:
     for cache in p_caches:
         offst = ndb(control_unit._double_buffer)
@@ -190,5 +180,12 @@ with open(f"records/t{control_unit.t-1}","wb") as fp:
                 b = fp.write(p.tobytes())
                 assert b == 24, "uh oh"
 
-      
+    
 print(f"Emulator took {cycles_total} clock cycles to simulate {T} timesteps")
+
+path = f"performance.csv"
+if not os.path.exists(path):
+    with open(path,"w") as fp:
+        print(f"N_PARTICLE,N_CELL,T,N_CPAR,N_PPAR,cycles_total", file=fp)
+with open(path,"a") as fp:
+    print(f"{N_PARTICLE},{N_CELL},{T},{N_CPAR},{N_PPAR},{cycles_total}", file=fp)

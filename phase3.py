@@ -21,7 +21,6 @@ class PositionUpdateController(Logic):
         self.raddr = Output(self,"oaddr")
         self.overwrite_addr = Output(self,"overwrite-addr")
        
-
     def logic(self):
         ready = self.ready.get()
         double_buffer = self.double_buffer.get()

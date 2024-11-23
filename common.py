@@ -1,3 +1,4 @@
+import argparse
 from hls import *
 import random
 from collections import deque
@@ -27,22 +28,30 @@ class Position, Velocity, and Acceleration - I found when trying to implement th
 particleFilter and forcePipeline - these are instances of ParticleFilter and ForcePipeline. Because they are shared between phase 1 and 2, I have implemented them here. We only use one of each for simplicity (we may expand to more in the future). particleFilter expects two instances of Position, and forcePipeline produces a tuple of Accelerations
 '''
 
+parser = argparse.ArgumentParser()
+parser.add_argument("-c","--cpar", type=int, default=9)
+parser.add_argument("-p","--ppar", type=int, default=4)
+parser.add_argument("-t","--time", type=int, default=2)
+parser.add_argument("-n","--particles", type=int, default=300)
+parser.add_argument("-u","--size", type=int, default=3)
+args = parser.parse_args()
 
 m = MockFPGA()
 
 # Emulator parameters
-T = 100 # number of timesteps to simulate
-DT = 1e-2 # timestep length
-UNIVERSE_SIZE = 3 # size of one dimension of the universe
+T = args.time # number of timesteps to simulate
+DT = 1e-7 # timestep length
+UNIVERSE_SIZE = args.size # size of one dimension of the universe
+N_PARTICLE = args.particles
 EPSILON = 40 # LJ const
 SIGMA = 1 # LJ const
-DENSITY = 10 # particles per cell
 SEED = 0 # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 70 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 13  # depth of filter pipeline
 N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
-N_PPAR = 4 # particle parallelism
-N_CPAR = 4 # cell parallelism
+
+N_CPAR = args.cpar # particle parallelism
+N_PPAR = args.ppar # cell parallelism
 
 VERIFY_COMPUTED = True # At every timestep, use verify.compute_targets to compare the emulator's computations with what they should be
 ERR_TOLERANCE = 1e-2 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
@@ -58,7 +67,6 @@ CUTOFF = SIGMA * 2.5
 L = CUTOFF * UNIVERSE_SIZE
 N_IDENT = N_CELL*BSIZE
 LJ_MAX = None # this will be computed below
-N_PARTICLE = DENSITY * N_CELL
 
 seed(SEED)
 v0 = lambda: EPSILON*(random() - 0.5)

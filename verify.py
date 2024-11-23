@@ -22,6 +22,7 @@ def offst():
 def compute_timestep(positions, velocities):
     accelerations = [[numpy.zeros_like(r) for r in cell] for cell in positions]
     for cell_r in range(N_CELL):
+        print(f"Computing direct {cell_r}")
         for addr_r, reference in enumerate(positions[cell_r]):
             for cell_n in neighborhood(cell_r, full=True):
                 for addr_n, neighbor in enumerate(positions[cell_n]):
