@@ -122,34 +122,25 @@ verify_emulator() # initialized the filter_expect and pipeline_expect sets
 t = 0
 cycles_total = 0
 t0 = control_unit.t
+max_err = -inf
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
         print(f"CYCLE {control_unit.t}-{t} (p={N_PPAR}, c={N_CPAR}) {control_unit.phase}:", end=" ")
         m.clock()
         t += 1
         if control_unit.t != t0:
-            verify_emulator()
+            err = verify_emulator()
+            if err > max_err:
+                max_err = err
             t0 = control_unit.t
             cycles_total += t
             t = 0
 
-
-
-cycles_total += t
-with open(f"records/t{control_unit.t-1}","wb") as fp:
-    for cache in p_caches:
-        offst = ndb(control_unit._double_buffer)
-        for p in cache.contents[offst:offst+DBSIZE]:
-            if p is not NULL:
-                b = fp.write(p.tobytes())
-                assert b == 24, "uh oh"
-
-    
 print(f"Emulator took {cycles_total} clock cycles to simulate {T} timesteps")
 
 path = f"performance.csv"
 if not os.path.exists(path):
     with open(path,"w") as fp:
-        print(f"N_PARTICLE,N_CELL,T,N_CPAR,N_PPAR,cycles_total", file=fp)
+        print(f"N_PARTICLE,N_CELL,T,N_CPAR,N_PPAR,cycles_total,max_err", file=fp)
 with open(path,"a") as fp:
-    print(f"{N_PARTICLE},{N_CELL},{T},{N_CPAR},{N_PPAR},{cycles_total}", file=fp)
+    print(f"{N_PARTICLE},{N_CELL},{T},{N_CPAR},{N_PPAR},{cycles_total},{max_err}", file=fp)

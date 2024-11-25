@@ -2,7 +2,7 @@
 records
 *.gif
 *.swp
-*.csv
 *.jpg
 *.png
 test.py
+*.csv

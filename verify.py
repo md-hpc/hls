@@ -26,6 +26,9 @@ def compute_timestep(positions, velocities):
         for addr_r, reference in enumerate(positions[cell_r]):
             for cell_n in neighborhood(cell_r, full=True):
                 for addr_n, neighbor in enumerate(positions[cell_n]):
+                    f = lj(reference,neighbor)
+                    accelerations[cell_r][addr_r] = accelerations[cell_r][addr_r] + f * DT
+                    
                     r = Acceleration(cell = cell_r, addr = addr_r + offst(), a = reference)
                     n = Acceleration(cell = cell_n, addr = addr_n + offst(), a = neighbor)
                     pi = pair_ident(r,n)
@@ -37,8 +40,6 @@ def compute_timestep(positions, velocities):
                         continue
                     pipeline_expect.add(pi)
 
-                    f = lj(reference,neighbor)
-                    accelerations[cell_r][addr_r] = accelerations[cell_r][addr_r] + f * DT
                     
     new_positions = [[] for _ in range(N_CELL)]
     new_velocities = [[] for _ in range(N_CELL)]
@@ -82,7 +83,8 @@ def verify_emulator():
     if n_particle != N_PARTICLE:
         print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
         exit(1)
-
+    
+    max_err = -inf
     if target_positions is not None:
         passed = True
         for cell, P in enumerate(positions):
@@ -103,7 +105,8 @@ def verify_emulator():
                 if not matched:
                     print(f"{cell}, {addr_r} could not be matched. Min err was {min_err}")
                     passed = False
-
+                if min_err > max_err:
+                    max_err = min_err
         if not passed:
             print("Positions are incorrect")
             exit(1)
@@ -112,6 +115,8 @@ def verify_emulator():
     filter_inputs.clear()
 
     target_positions, _ = compute_timestep(positions, velocities)
+
+    return max_err
 
 for cp in phase1.compute_pipelines:
     for f in cp.filter_bank:
