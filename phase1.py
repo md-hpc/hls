@@ -99,6 +99,7 @@ class PositionReadController(Logic):
                     self._cell_r += N_CPAR
                     if self._cell_r >= N_CELL:
                         # we've iterated over all cells. Terminate timestep
+                        print("done")
                         self.halt()
                         return
                     
@@ -130,10 +131,10 @@ class PositionReadController(Logic):
 
 
         if self._new_reference is NULL:
-            state = "neighbor"
+            state = "reading neighbors"
         else:
-            state = "reference"
-        print(f"{state}: cell_r=={self._cell_r} addr=={addr} addr_r=={self._addr_r} addr_n=={self._addr_n}")
+            state = "loading references"
+        print(f"{state}, cell_r=={self._cell_r} addr=={addr} addr_r=={self._addr_r} addr_n=={self._addr_n}")
         
         
 
@@ -217,9 +218,9 @@ class PositionReader(Logic):
             [nul(references) for references in self.references]
             self.stale_reference.set(_stale_reference)
 
-class AccelerationUpdateController(Logic):
+class VelocityUpdateController(Logic):
     def __init__(self):
-        super().__init__("acceleration-update-controller")
+        super().__init__("velocity-update-controller")
 
         self.i = [
             [Input(self,f"i{j}-{i}") for i in range(N_PPAR)]
@@ -230,12 +231,13 @@ class AccelerationUpdateController(Logic):
         self.oaddr = [Output(self,f"oaddr-{i}") for i in range(N_CELL)]
         self.qempty = Output(self,"qempty")
 
+
     def logic(self):
         for inputs in self.i:
-            for a in [i.get() for i in inputs]:
-                if a is NULL:
+            for v in [i.get() for i in inputs]:
+                if v is NULL:
                     continue
-                self._queues[a.cell].append(a)
+                self._queues[v.cell].append(v)
             
         _qempty = True
         for q, oaddr, o in zip(self._queues, self.oaddr, self.o):
@@ -244,34 +246,34 @@ class AccelerationUpdateController(Logic):
                 o.set(NULL)
             else:
                 _qempty = False
-                a = q.pop(0)
-                oaddr.set(a.addr)
-                o.set(a)
+                v = q.pop(0)
+                oaddr.set(v.addr)
+                o.set(v)
 
         self.qempty.set(_qempty)
 
-class AccelerationUpdater(Logic):
+class VelocityUpdater(Logic):
     def __init__(self):
-        super().__init__("acceleration-updater")
+        super().__init__("velocity-updater")
 
         self.fragments = [Input(self,f"fragment{i}") for i in range(N_CELL)]
-        self.ai = [Input(self,f"ai{i}") for i in range(N_CELL)]
-        self.ao = [Output(self,f"ao{i}") for i in range(N_CELL)]
+        self.vi = [Input(self,f"vi{i}") for i in range(N_CELL)]
+        self.vo = [Output(self,f"vo{i}") for i in range(N_CELL)]
 
     def logic(self):
-        for fragment, ai, ao in zip(self.fragments, self.ai, self.ao):
+        for fragment, vi, vo in zip(self.fragments, self.vi, self.vo):
             _fragment = fragment.get() 
-            _ai = ai.get()
+            _vi = vi.get()
 
             if _fragment is NULL:
-                ao.set(NULL)
+                vo.set(NULL)
                 continue
 
-            if _ai is NULL:
-                _ao = _fragment.a
+            if _vi is NULL:
+                _vo = _fragment.v
             else:
-                _ao = _fragment.a + _ai
-            ao.set(_ao)
+                _vo = _fragment.v + _vi
+            vo.set(_vo)
         
 position_read_controller = m.add(PositionReadController())
 position_reader = m.add(PositionReader())
@@ -281,8 +283,8 @@ compute_pipelines = [
     for bidx in range(N_CPAR)
 ]
 
-acceleration_update_controller = m.add(AccelerationUpdateController())
-acceleration_updater = m.add(AccelerationUpdater())
+velocity_update_controller = m.add(VelocityUpdateController())
+velocity_updater = m.add(VelocityUpdater())
 
 # each compute pipeline plus the acceleration_update_controller
 phase1_signaler = m.add(And(N_CPAR*N_PPAR+1,"phase1-signaler"))
@@ -322,19 +324,19 @@ for bidx in range(N_CPAR):
 # acceleration_update_controller inputs
 for bidx in range(N_CPAR):
     for pidx in range(N_PPAR):
-        connect(compute_pipelines[bidx][pidx].o, acceleration_update_controller.i[bidx][pidx])
+        connect(compute_pipelines[bidx][pidx].o, velocity_update_controller.i[bidx][pidx])
 
 # acceleration_updater inputs
-for o, i in zip(acceleration_update_controller.o, acceleration_updater.fragments):
+for o, i in zip(velocity_update_controller.o, velocity_updater.fragments):
     connect(o, i)
-for a_cache, i in zip(a_caches, acceleration_updater.ai):
-    connect(a_cache.o, i)
+for v_cache, i in zip(v_caches, velocity_updater.vi):
+    connect(v_cache.o, i)
 
 # phase1_signaler inputs
 for bidx in range(N_CPAR):
     for pidx in range(N_PPAR):
         connect(compute_pipelines[bidx][pidx].done, phase1_signaler.i[bidx*N_PPAR+pidx])
-connect(acceleration_update_controller.qempty, phase1_signaler.i[-1])
+connect(velocity_update_controller.qempty, phase1_signaler.i[-1])
 
 # ==== STATE ====
 # stale_reference input
@@ -346,21 +348,17 @@ for imux, omux in zip(p_imuxes, p_omuxes):
     connect(null_const.o, imux.iaddr_phase1)
     connect(null_const.o, imux.i_phase1)
 
-# a_muxes inputs
+# v_muxes inputs
 for i in range(N_CELL):
-    imux, omux = a_imuxes[i], a_omuxes[i]
-    connect(acceleration_update_controller.oaddr[i], omux.oaddr_phase1)
-    connect(acceleration_update_controller.oaddr[i], imux.iaddr_phase1)
-    connect(acceleration_updater.ao[i], imux.i_phase1)
+    imux, omux = v_imuxes[i], v_omuxes[i]
+    connect(velocity_update_controller.oaddr[i], omux.oaddr_phase1)
+    connect(velocity_update_controller.oaddr[i], imux.iaddr_phase1)
+    connect(velocity_updater.vo[i], imux.i_phase1)
 
 # ==== CONTROL ====
 CTL_DONE = phase1_signaler.o
 
-# for emulator.py
-tmp = []
-for compute_bank in compute_pipelines:
-    tmp.extend(compute_bank)
-compute_pipelines = tmp
+compute_pipelines = [cp for cp in concat(*compute_pipelines)]
 
 # catch 
 o = None

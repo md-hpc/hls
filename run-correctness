@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python verify.py
+./run -t 20

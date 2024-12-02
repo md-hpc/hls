@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+rm performance.csv
+
+for c in {1..6}; do
+	for p in {1..6}; do
+		./run -c $c -p $p -t 1 -n 300
+	done
+done

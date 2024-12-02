@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python viz.py
+python direct.py

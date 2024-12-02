@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-python emulator.py
+python emulator.py $@

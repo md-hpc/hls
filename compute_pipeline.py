@@ -3,46 +3,7 @@ from common import *
 from numpy.linalg import norm
 
 VERBOSE = False
-
-def next_timestep(p_caches, pipeline_inputs, filter_inputs, filter_expect, double_buffer):
-    pipeline_inputs.clear()
-    filter_inputs.clear()
-
-    for pi in filter_expect:
-        r, n = pi_to_p(pi)
-        # print(f"expected {r} {n}")
-    if len(filter_expect):
-        print(f"Filter banks from last timestep did not recieve all expected inputs. {len(filter_expect)} missing")
-        exit()
-    
-
-    for cell_r, _ in enumerate(p_caches):
-         for cell_n in neighborhood(cell_r):
-            if not n3l(cell_r, cell_n):
-                continue
-            r_cache = p_caches[cell_r]
-            n_cache = p_caches[cell_n]
-            for addr_r, r in bram_enum(r_cache.contents, double_buffer):
-                if r is NULL:
-                    continue
-                for addr_n, n in bram_enum(n_cache.contents, double_buffer):
-                    if n is NULL:
-                        continue
-                    assert addr_n // DBSIZE == double_buffer
-                    assert addr_r // DBSIZE == double_buffer
-                    reference = Position(cell = cell_r, addr = addr_r, r = r)
-                    neighbor = Position(cell = cell_n, addr = addr_n, r = n)
-                    pi = pair_ident(reference,neighbor)
-                    if pi in filter_expect:
-                        print("duplicate in verify!!")
-                        exit()
-                    filter_expect.add(pi)
-    
-    n_particle = sum([sum([r is not NULL for _, r in bram_enum(cache.contents, double_buffer)]) for cache in p_caches])
-    if n_particle != N_PARTICLE:
-        print(f"Particle count has changed from {N_PARTICLE} to {n_particle}")
-        exit(1)
-    
+   
 class ParticleFilter(Logic):
     def __init__(self,ident):
         super().__init__(f"particle-filter-{ident}")
@@ -64,9 +25,7 @@ class ParticleFilter(Logic):
         if reference is NULL or neighbor is NULL:
             self.o.set(NULL)
             return
-       
-        if VERBOSE:
-            print(reference.origin(), neighbor.origin())
+
         pi = pair_ident(reference, neighbor)
         if pi in self.input_set:
             print(f"Filter bank recieved duplicate pair from origin {pi_to_p(pi)}")
@@ -76,19 +35,24 @@ class ParticleFilter(Logic):
             print(f"Filter bank recieved particle from unexpected origin {pi_to_p(pi)}")
             exit()
         self.input_expect.remove(pi)
-
-        if reference == neighbor:
-            self.o.set(NULL)
-            return
+         
 
         if not n3l(reference.r, neighbor.r):
             self.o.set(NULL)
             return
+        if reference == neighbor:
+            self.o.set(NULL)
+            return
         
-        r = norm(reference.r - neighbor.r)
+        r = norm(modr(reference.r,neighbor.r))
         if r == 0:
             print(f"{self.name} received duplicate position: {reference} and {neighbor}")
             exit()
+        
+        if r >= CUTOFF:
+            self.o.set(NULL)
+            return
+
         self.o.set(
                 [reference, neighbor] if r < CUTOFF else NULL
         )
@@ -121,7 +85,9 @@ class ForcePipeline(Logic):
      
         self.pipeline(FORCE_PIPELINE_STAGES)
         
-        self.input_set = None        
+        self.input_set = None
+        self.input_expect = None
+
     def logic(self):
         i = self.i.get()
         if i is NULL:
@@ -134,13 +100,16 @@ class ForcePipeline(Logic):
         if pi in self.input_set:
             print(f"duplicate: {reference}, {neighbor}")
             exit(1)
+        pi2 = pair_ident(neighbor, reference)
         self.input_set.add(pi)
+        self.input_expect.remove(pi)
+        self.input_expect.remove(pi2)
 
-        f = lj(reference.r, neighbor.r) * DT
+        v = lj(reference.r, neighbor.r) * DT
 
         self.o.set([
-            Acceleration(cell = reference.cell, addr = reference.addr, a = f),
-            Acceleration(cell = neighbor.cell, addr = neighbor.addr, a = -1*f),
+            Velocity(cell = reference.cell, addr = reference.addr, v = v),
+            Velocity(cell = neighbor.cell, addr = neighbor.addr, v = -1*v),
         ])
 
 class PipelineReader(Logic):
@@ -171,7 +140,7 @@ class PipelineReader(Logic):
                 self._queue.append(self._reference)
                 self._reference = reference
             else:
-                self._reference.a += reference.a
+                self._reference.v += reference.v
             self._queue.append(neighbor)
 
         self.done.set(len(self._queue) == 0 and almost_done)

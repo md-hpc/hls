@@ -144,6 +144,7 @@ class BRAM:
         
         self.verbose = False
 
+
     def write(self):
         i = self.i()
         iaddr = self.iaddr()
@@ -298,6 +299,8 @@ class MockFPGA:
         self.units = []
         self._init = False
 
+        self.clock_total = 0
+
     def add(self, obj):
         t = type(obj)
         if not isinstance(obj, Logic) and t is not Register and t is not BRAM:
@@ -320,10 +323,12 @@ class MockFPGA:
         for unit in self.units:
             if type(unit) is BRAM or type(unit) is Register:
                 unit.write()
-
+        
         for unit in self.units:
             unit.reset()
-    
+
+        self.clock_total += 1
+
     def validate(self):
         if not self.validate_identifiers():
             print("validate_identifiers failed")
