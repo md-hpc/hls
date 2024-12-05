@@ -200,6 +200,8 @@ class BRAM:
         
         self._called = False
 
+builtin = ["_n","_inputs","_outputs","_abc_impl","_called","_init","_pipeline"]
+
 
 class Logic(ABC):
     def __init__(self, name):
@@ -263,6 +265,10 @@ class Logic(ABC):
 
         if self.verbose:
             print(f"{self.name}:")
+            print("\tSTATE")
+            for attr in dir(self):
+                if attr[0] == "_" and attr[1] != "_" and attr not in builtin:
+                    print(f"\t\t{attr}: {getattr(self,attr)}")
             print("\tINPUTS")
             for i in self._inputs:
                 print(f"\t\t{i.name.split('/')[1]}: {i.val}")

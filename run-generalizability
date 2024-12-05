@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-for n in 300 400 500; do
-	for N in 3 4 5; do
-		./run -n $n -u $N
-	done
-done
+python3 emulator.py -n 300 -u 3
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+
+python3 emulator.py -n 400 -u 4
+if [ $? -ne 0 ]; then
+    exit 1
+fi
+
+python3 emulator.py -n 500 -u 5
+if [ $? -ne 0 ]; then
+    exit 1
+fi

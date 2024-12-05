@@ -22,9 +22,8 @@ def offst():
 def compute_timestep(positions, velocities):
     accelerations = [[numpy.zeros_like(r) for r in cell] for cell in positions]
     for cell_r in range(N_CELL):
-        print(f"Computing direct {cell_r}")
         for addr_r, reference in enumerate(positions[cell_r]):
-            for cell_n in neighborhood(cell_r, full=True):
+            for cell_n in range(N_CELL):
                 for addr_n, neighbor in enumerate(positions[cell_n]):
                     f = lj(reference,neighbor)
                     accelerations[cell_r][addr_r] = accelerations[cell_r][addr_r] + f * DT
@@ -32,13 +31,12 @@ def compute_timestep(positions, velocities):
                     r = Acceleration(cell = cell_r, addr = addr_r + offst(), a = reference)
                     n = Acceleration(cell = cell_n, addr = addr_n + offst(), a = neighbor)
                     pi = pair_ident(r,n)
-                    
+
                     if n3l_cell(cell_r, cell_n):
                         filter_expect.add(pi)    
                     
-                    if norm(modr(reference, neighbor)) >= CUTOFF or cell_r == cell_n and addr_r == addr_n:
-                        continue
-                    pipeline_expect.add(pi)
+                    if norm(modr(reference, neighbor)) < CUTOFF and (cell_r != cell_n or addr_r != addr_n):
+                        pipeline_expect.add(pi)
 
                     
     new_positions = [[] for _ in range(N_CELL)]
