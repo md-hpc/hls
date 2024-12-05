@@ -20,7 +20,7 @@ if "--uniform-spread" in sys.argv:
 else:
     import phase1
 
-import phase3
+import phase3RN
 
 
 
@@ -81,8 +81,8 @@ connect(phase3_done.o, control_unit.phase3_done)
 # register inputs
 connect(phase1.CTL_DONE, phase1_done.i)
 
-phase3_signal = m.add(And(len(phase3.CTL_DONE),"phase3-signal"))
-for signal, i in zip(phase3.CTL_DONE, phase3_signal.i):
+phase3_signal = m.add(And(len(phase3RN.CTL_DONE),"phase3-signal"))
+for signal, i in zip(phase3RN.CTL_DONE, phase3_signal.i):
     connect(signal, i)    
 connect(phase3_signal.o, phase3_done.i)
 
@@ -92,9 +92,9 @@ for i in phase1.CTL_DOUBLE_BUFFER:
 connect(control_unit.phase1_ready, phase1.CTL_READY)
 
 # phase 3 connections
-for i in phase3.CTL_DOUBLE_BUFFER:
+for i in phase3RN.CTL_DOUBLE_BUFFER:
     connect(control_unit.double_buffer, i)
-for i in phase3.CTL_READY:
+for i in phase3RN.CTL_READY:
     connect(control_unit.phase3_ready, i)
 
 # p_muxes inputs
