@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-./run -t 20
+python3 emulator.py -t 20

@@ -20,7 +20,7 @@ if "--uniform-spread" in sys.argv:
 else:
     import phase1
 
-import faux_phase3 as phase3
+import phase3
 
 
 
@@ -127,7 +127,7 @@ t0 = control_unit.t
 max_err = -inf
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
-        print(f"CYCLE {control_unit.t}-{t} (p={N_PPAR}, c={N_CPAR}) {control_unit.phase}")
+        print(f"CYCLE {control_unit.t}-{t} ({UNIVERSE_SIZE}, {N_PARTICLE})")
         CYCLE = t
         m.clock()
         t += 1
