@@ -34,6 +34,7 @@ parser.add_argument("-p","--ppar", type=int, default=4)
 parser.add_argument("-t","--time", type=int, default=2)
 parser.add_argument("-n","--particles", type=int, default=300)
 parser.add_argument("-u","--size", type=int, default=3)
+parser.add_argument("-s","--seed", type=int, default=0)
 args = parser.parse_args()
 
 
@@ -44,7 +45,7 @@ UNIVERSE_SIZE = args.size # size of one dimension of the universe
 N_PARTICLE = args.particles
 EPSILON = 40 # LJ const
 SIGMA = 1 # LJ const
-SEED = 0 # Random seed for particle initialization
+SEED = args.seed # Random seed for particle initialization
 FORCE_PIPELINE_STAGES = 70 # depth of computation pipeline
 FILTER_PIPELINE_STAGES = 13  # depth of filter pipeline
 N_PIPELINE = 7 # for particle-mapping and uniform-spread, number of compute units working in parallel
@@ -56,7 +57,7 @@ VERIFY_COMPUTED = True # At every timestep, use verify.compute_targets to compar
 ERR_TOLERANCE = 1e-2 # % error tolerance. The max permissable value of norm(target-computed)/norm(computed) for each computed acceleration, velocity, or position
 
 # constants
-N_FILTER = 18 # number of filters per force pipeline
+NSIZE = None # size of cell neighborhood, computed below
 BSIZE = 512 # bram size
 DBSIZE = BSIZE//2 # double buffer buffer size
 
@@ -67,6 +68,9 @@ L = CUTOFF * UNIVERSE_SIZE # length of one side of the universe
 N_IDENT = N_CELL*BSIZE # maximum number of unique particles. Used for verification
 
 seed(SEED)
+
+# for debugging
+CYCLE = None
 
 
 # gives an initial position and velocity vector
@@ -142,9 +146,9 @@ def init_bram(ident, mux_idents):
     return caches, imuxes, omuxes
 
 
-# one-dimensional modulo L distance from a to b
-def modd(a,b):
-    opts = [(b-L)-a, b-a, (b+L)-a]
+# one-dimensional modulo m distance from a to b
+def modd(a,b,M):
+    opts = [(b-M)-a, b-a, (b+M)-a]
     m = abs(opts[0])
     mi = 0
     for i, opt in enumerate(opts):
@@ -157,7 +161,7 @@ def modd(a,b):
 def modr(reference, neighbor):
     r = numpy.zeros(3)
     for i in range(3):
-        r[i] = modd(reference[i], neighbor[i])
+        r[i] = modd(reference[i], neighbor[i], L)
     return r
 
 # whether we should evaluate neighbor wrt reference under N3L half-shell method
@@ -172,10 +176,21 @@ def n3l(reference,neighbor):
             return True
     return False # should not evaluate self wrt self
 
+
 # whether we should evaluate neighbor cell cell_n wrt reference cell cell_r under N3: half-shell method
 def n3l_cell(cell_r, cell_n):
-    return (cubic_idx(cell_n)[0] - cubic_idx(cell_r)[0]) % UNIVERSE_SIZE <= 1
+    cell = [modd(r,n,UNIVERSE_SIZE) for r,n in zip(cubic_idx(cell_r),cubic_idx(cell_n))]
+    
+    if any([abs(idx) > 1 for idx in cell]):
+        return False
 
+    for idx in cell:
+        if idx < 0 or idx > 1:
+            return False
+        if idx > 0:
+            return True
+    return True # reference cell can be the same as neighbor cell
+            
 
 # converts a cubic cell index [i,j,k] to a linear (integer) index
 def linear_idx(i,j,k):
@@ -189,12 +204,13 @@ def cubic_idx(i):
 # full == True will just yield all neighboring cells instead.
 def neighborhood(cell, full=False):
     i, j, k = cubic_idx(cell)
-    for di in range(-1 if full else 0,2):
+    for di in range(-1, 2):
         for dj in range(-1,2):
             for dk in range(-1,2):
-                yield linear_idx(i+di, j+dj, k+dk)
-sz = sum([1 for _ in neighborhood(0)])
-assert sz == N_FILTER, sz
+                if n3l_cell(0,linear_idx(di,dj,dk)) or full:
+                    yield linear_idx(i+di, j+dj, k+dk)
+NSIZE = sum([1 for _ in neighborhood(0)])
+print(NSIZE)
 
 # structs to hold particle data while it's passing through pipelines
 class Struct:
@@ -250,6 +266,18 @@ class And(Logic):
     def logic(self):
         self.o.set(
             all([i.get() and i.get() is not NULL for i in self.i])
+        )
+
+class Or(Logic):
+    def __init__(self,n,ident):
+        super().__init__(ident)
+
+        self.i = [Input(self,f"i{i}") for i in range(n)]
+        self.o = Output(self,"o")
+
+    def logic(self):
+        self.o.set(
+            any([i.get() and i.get() is not NULL for i in self.i])
         )
 
 # Sets list or nested list of Outputs to NULL

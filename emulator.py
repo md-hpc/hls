@@ -20,7 +20,7 @@ if "--uniform-spread" in sys.argv:
 else:
     import phase1
 
-import phase3
+import faux_phase3 as phase3
 
 
 
@@ -87,7 +87,8 @@ for signal, i in zip(phase3.CTL_DONE, phase3_signal.i):
 connect(phase3_signal.o, phase3_done.i)
 
 # phase 1 inputs
-connect(control_unit.double_buffer, phase1.CTL_DOUBLE_BUFFER)
+for i in phase1.CTL_DOUBLE_BUFFER:
+    connect(control_unit.double_buffer, i)
 connect(control_unit.phase1_ready, phase1.CTL_READY)
 
 # phase 3 connections
@@ -119,13 +120,15 @@ for _ in range(N_PARTICLE):
         cidx[idx] += 1
 verify_emulator() # initialized the filter_expect and pipeline_expect sets
 
+
 t = 0
 cycles_total = 0
 t0 = control_unit.t
 max_err = -inf
 with numpy.errstate(all="raise"):
     while control_unit.t < T:
-        print(f"CYCLE {control_unit.t}-{t} (p={N_PPAR}, c={N_CPAR}) {control_unit.phase}:", end=" ")
+        print(f"CYCLE {control_unit.t}-{t} (p={N_PPAR}, c={N_CPAR}) {control_unit.phase}")
+        CYCLE = t
         m.clock()
         t += 1
         if control_unit.t != t0:
@@ -137,6 +140,7 @@ with numpy.errstate(all="raise"):
             t = 0
 
 print(f"Emulator took {cycles_total} clock cycles to simulate {T} timesteps")
+
 
 path = f"performance.csv"
 if not os.path.exists(path):
